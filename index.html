@@ -12,49 +12,34 @@
     <header class="app-header">
       <div>
         <h1>케어라벨 혼용률 계산기</h1>
-        <p>Style별 YY 입력, 저장, 다중 추출, JSON 백업/복원</p>
+        <p>Style별 YY 입력, 결과 추출, DB 관리, JSON 백업/복원</p>
       </div>
-      <div class="header-actions">
-        <button type="button" id="exportJsonBtn">JSON 백업</button>
-        <label class="file-button" for="importJsonInput">JSON 복원</label>
-        <input id="importJsonInput" class="sr-only" type="file" accept="application/json,.json">
-        <button type="button" id="resetAllBtn" class="danger">전체 초기화</button>
-      </div>
+      <div id="messageArea" class="message-area" aria-live="polite"></div>
     </header>
 
+    <nav class="top-tabs" aria-label="Main sections">
+      <button type="button" class="tab-button active" data-tab="styleInput">Style Input</button>
+      <button type="button" class="tab-button" data-tab="savedStyles">Saved Styles</button>
+      <button type="button" class="tab-button" data-tab="results">Results</button>
+      <button type="button" class="tab-button" data-tab="dbManagement">DB Management</button>
+      <button type="button" class="tab-button" data-tab="backupRestore">Backup / Restore</button>
+    </nav>
+
     <main class="app-shell">
-      <aside class="sidebar">
-        <section class="panel">
-          <h2>Style</h2>
-          <label class="field-label" for="styleNameInput">Style Name</label>
-          <input id="styleNameInput" class="text-input" type="text" placeholder="예: 28 EVO PANT" autocomplete="off">
-          <div class="button-row">
-            <button type="button" id="newStyleBtn">신규</button>
-            <button type="button" id="saveStyleBtn" class="primary">저장</button>
-          </div>
-        </section>
-
-        <section class="panel saved-panel">
-          <div class="panel-title-row">
-            <h2>저장된 Style</h2>
-            <span id="savedCount" class="count-badge">0</span>
-          </div>
-          <div id="savedStyleList" class="saved-list" aria-live="polite"></div>
-          <div class="button-stack">
-            <button type="button" id="extractSelectedBtn">선택 스타일 추출</button>
-            <button type="button" id="deleteSelectedBtn" class="danger">선택 삭제</button>
-          </div>
-        </section>
-      </aside>
-
-      <section class="workspace">
+      <section id="styleInput" class="tab-panel active">
         <div class="toolbar">
+          <div class="style-controls">
+            <label class="field-label" for="styleNameInput">Style Name</label>
+            <input id="styleNameInput" class="text-input" type="text" placeholder="예: 28 EVO PANT" autocomplete="off">
+          </div>
           <div class="search-wrap">
-            <label for="fabricSearchInput">Fabric Search</label>
+            <label class="field-label" for="fabricSearchInput">Fabric Search</label>
             <input id="fabricSearchInput" type="search" placeholder="원단명 또는 Composition 검색">
           </div>
           <div class="toolbar-actions">
+            <button type="button" id="newStyleBtn">신규 스타일</button>
             <button type="button" id="clearYyBtn">YY 지우기</button>
+            <button type="button" id="saveStyleBtn" class="primary">저장</button>
             <button type="button" id="extractCurrentBtn" class="primary">현재 스타일 추출</button>
           </div>
         </div>
@@ -63,22 +48,7 @@
           <section class="fabric-section">
             <div class="table-wrap">
               <table id="fabricTable" class="data-table">
-                <thead>
-                  <tr>
-                    <th>No</th>
-                    <th>Fabric Name</th>
-                    <th>Composition</th>
-                    <th>YY</th>
-                    <th>Ratio</th>
-                    <th>POLYESTER (COATED)</th>
-                    <th>POLYESTER (UNCOATED)</th>
-                    <th>POLYURETHANE</th>
-                    <th>NYLON</th>
-                    <th>KEVLAR</th>
-                    <th>SPANDEX</th>
-                    <th>LEATHER</th>
-                  </tr>
-                </thead>
+                <thead id="fabricTableHead"></thead>
                 <tbody id="fabricTableBody"></tbody>
               </table>
             </div>
@@ -101,7 +71,25 @@
             </table>
           </aside>
         </div>
+      </section>
 
+      <section id="savedStyles" class="tab-panel">
+        <div class="panel saved-panel">
+          <div class="panel-title-row">
+            <h2>저장된 Style</h2>
+            <span id="savedCount" class="count-badge">0</span>
+          </div>
+          <div id="savedStyleList" class="saved-list" aria-live="polite"></div>
+          <div class="button-row">
+            <button type="button" id="extractSelectedBtn" class="primary">선택 스타일 추출</button>
+            <button type="button" id="downloadSelectedCsvBtn">선택 CSV 다운로드</button>
+            <button type="button" id="downloadSelectedXlsxBtn">선택 XLSX 다운로드</button>
+            <button type="button" id="deleteSelectedBtn" class="danger">선택 삭제</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="results" class="tab-panel">
         <section class="result-panel">
           <div class="result-toolbar">
             <h2>추출 결과</h2>
@@ -115,6 +103,86 @@
             <p class="empty-state">추출할 스타일을 선택하거나 현재 스타일을 추출하세요.</p>
           </div>
         </section>
+      </section>
+
+      <section id="dbManagement" class="tab-panel">
+        <div class="db-toolbar">
+          <div>
+            <h2>DB Management</h2>
+            <p id="dbWarning" class="db-warning hidden">DB를 수정하면 기존 스타일 계산 결과에도 영향을 줄 수 있습니다. 수정 전 JSON 백업을 권장합니다.</p>
+          </div>
+          <div class="button-row">
+            <button type="button" id="dbEditBtn" class="primary">DB 수정 모드</button>
+            <button type="button" id="dbSaveLockBtn" class="primary" disabled>DB 저장 후 잠금</button>
+            <button type="button" id="dbCancelBtn" disabled>변경 취소</button>
+            <button type="button" id="dbBackupBtn">JSON 백업 다운로드</button>
+          </div>
+        </div>
+
+        <div id="validationArea" class="validation-area hidden"></div>
+
+        <div class="sub-tabs">
+          <button type="button" class="sub-tab active" data-db-tab="materials">Material DB</button>
+          <button type="button" class="sub-tab" data-db-tab="compositions">Composition DB</button>
+          <button type="button" class="sub-tab" data-db-tab="fabrics">Fabric DB</button>
+        </div>
+
+        <section id="materialsDb" class="db-panel active">
+          <div class="toolbar compact">
+            <input id="materialSearchInput" type="search" placeholder="Material 검색">
+            <button type="button" id="addMaterialBtn" class="primary db-edit-only" disabled>소재 추가</button>
+          </div>
+          <div class="table-wrap db-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Order</th><th>Material Name</th><th>ID</th><th>Action</th></tr>
+              </thead>
+              <tbody id="materialTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="compositionsDb" class="db-panel">
+          <div class="toolbar compact">
+            <input id="compositionSearchInput" type="search" placeholder="Composition 검색">
+            <button type="button" id="addCompositionBtn" class="primary db-edit-only" disabled>Composition 추가</button>
+          </div>
+          <div id="compositionList" class="composition-list"></div>
+        </section>
+
+        <section id="fabricsDb" class="db-panel">
+          <div class="toolbar compact">
+            <input id="fabricDbSearchInput" type="search" placeholder="Fabric 검색">
+            <select id="fabricSortSelect">
+              <option value="order">기본 순서</option>
+              <option value="name">원단명</option>
+              <option value="composition">Composition</option>
+            </select>
+            <button type="button" id="addFabricBtn" class="primary db-edit-only" disabled>원단 추가</button>
+          </div>
+          <div class="table-wrap db-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>No</th><th>Fabric Name</th><th>Composition</th><th>ID</th><th>Action</th></tr>
+              </thead>
+              <tbody id="fabricDbTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="backupRestore" class="tab-panel">
+        <div class="panel backup-panel">
+          <h2>Backup / Restore</h2>
+          <div class="button-row">
+            <button type="button" id="exportJsonBtn" class="primary">전체 데이터 JSON Export</button>
+            <label class="file-button" for="importJsonInput">전체 데이터 JSON Import</label>
+            <input id="importJsonInput" class="sr-only" type="file" accept="application/json,.json">
+            <button type="button" id="restoreSampleBtn">초기 예시 데이터로 복원</button>
+            <button type="button" id="resetAllBtn" class="danger">전체 초기화</button>
+          </div>
+          <div id="unmappedList" class="unmapped-list"></div>
+        </div>
       </section>
     </main>
   </body>
