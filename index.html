@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>케어라벨 혼용률 계산기</title>
+    <link rel="stylesheet" href="style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <h1>케어라벨 혼용률 계산기</h1>
+        <p>Style별 YY 입력, 저장, 다중 추출, JSON 백업/복원</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" id="exportJsonBtn">JSON 백업</button>
+        <label class="file-button" for="importJsonInput">JSON 복원</label>
+        <input id="importJsonInput" class="sr-only" type="file" accept="application/json,.json">
+        <button type="button" id="resetAllBtn" class="danger">전체 초기화</button>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <aside class="sidebar">
+        <section class="panel">
+          <h2>Style</h2>
+          <label class="field-label" for="styleNameInput">Style Name</label>
+          <input id="styleNameInput" class="text-input" type="text" placeholder="예: 28 EVO PANT" autocomplete="off">
+          <div class="button-row">
+            <button type="button" id="newStyleBtn">신규</button>
+            <button type="button" id="saveStyleBtn" class="primary">저장</button>
+          </div>
+        </section>
+
+        <section class="panel saved-panel">
+          <div class="panel-title-row">
+            <h2>저장된 Style</h2>
+            <span id="savedCount" class="count-badge">0</span>
+          </div>
+          <div id="savedStyleList" class="saved-list" aria-live="polite"></div>
+          <div class="button-stack">
+            <button type="button" id="extractSelectedBtn">선택 스타일 추출</button>
+            <button type="button" id="deleteSelectedBtn" class="danger">선택 삭제</button>
+          </div>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <div class="toolbar">
+          <div class="search-wrap">
+            <label for="fabricSearchInput">Fabric Search</label>
+            <input id="fabricSearchInput" type="search" placeholder="원단명 또는 Composition 검색">
+          </div>
+          <div class="toolbar-actions">
+            <button type="button" id="clearYyBtn">YY 지우기</button>
+            <button type="button" id="extractCurrentBtn" class="primary">현재 스타일 추출</button>
+          </div>
+        </div>
+
+        <div class="content-grid">
+          <section class="fabric-section">
+            <div class="table-wrap">
+              <table id="fabricTable" class="data-table">
+                <thead>
+                  <tr>
+                    <th>No</th>
+                    <th>Fabric Name</th>
+                    <th>Composition</th>
+                    <th>YY</th>
+                    <th>Ratio</th>
+                    <th>POLYESTER (COATED)</th>
+                    <th>POLYESTER (UNCOATED)</th>
+                    <th>POLYURETHANE</th>
+                    <th>NYLON</th>
+                    <th>KEVLAR</th>
+                    <th>SPANDEX</th>
+                    <th>LEATHER</th>
+                  </tr>
+                </thead>
+                <tbody id="fabricTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <aside class="summary-panel">
+            <h2>최종 혼용률</h2>
+            <div class="summary-meta">
+              <div>
+                <span>Current Style</span>
+                <strong id="currentStyleLabel">-</strong>
+              </div>
+              <div>
+                <span>Total YY</span>
+                <strong id="totalYyLabel">0.000</strong>
+              </div>
+            </div>
+            <table class="summary-table">
+              <tbody id="summaryTableBody"></tbody>
+            </table>
+          </aside>
+        </div>
+
+        <section class="result-panel">
+          <div class="result-toolbar">
+            <h2>추출 결과</h2>
+            <div class="result-actions">
+              <button type="button" id="printBtn">인쇄</button>
+              <button type="button" id="downloadCsvBtn">CSV 다운로드</button>
+              <button type="button" id="downloadXlsxBtn">XLSX 다운로드</button>
+            </div>
+          </div>
+          <div id="resultArea" class="result-area">
+            <p class="empty-state">추출할 스타일을 선택하거나 현재 스타일을 추출하세요.</p>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>
