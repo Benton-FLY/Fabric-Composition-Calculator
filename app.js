@@ -1,6 +1,8 @@
 const STORAGE_KEY = "fabricCompositionCalculator";
-const STORAGE_VERSION = 2;
+const STORAGE_VERSION = 3;
 const MIGRATION_BACKUP_KEY = "fabricCompositionBackupBeforeV2Migration";
+const CARE_LABEL_MODES = ["internal", "us", "eu"];
+const CARE_LABEL_TYPES = ["fiber", "custom-warning", "animal-nontextile"];
 
 const DEFAULT_MATERIALS = [
   { id: "polyester_coated", name: "POLYESTER (COATED)", order: 1 },
@@ -11,6 +13,46 @@ const DEFAULT_MATERIALS = [
   { id: "spandex", name: "SPANDEX", order: 6 },
   { id: "leather", name: "LEATHER", order: 7 },
 ];
+
+const DEFAULT_CARE_LABEL_MAPPINGS = {
+  internal: {
+    polyester_coated: { label: "POLYESTER (COATED)", type: "fiber", active: true },
+    polyester_uncoated: { label: "POLYESTER (UNCOATED)", type: "fiber", active: true },
+    polyurethane: { label: "POLYURETHANE", type: "custom-warning", active: true },
+    nylon: { label: "NYLON", type: "fiber", active: true },
+    kevlar: { label: "KEVLAR", type: "custom-warning", active: true },
+    spandex: { label: "SPANDEX", type: "fiber", active: true },
+    leather: { label: "LEATHER", type: "animal-nontextile", active: true },
+  },
+  us: {
+    polyester_coated: { label: "POLYESTER", type: "fiber", active: true },
+    polyester_uncoated: { label: "POLYESTER", type: "fiber", active: true },
+    polyurethane: { label: "POLYURETHANE", type: "custom-warning", active: true },
+    nylon: { label: "NYLON", type: "fiber", active: true },
+    kevlar: { label: "ARAMID", type: "fiber", active: true },
+    spandex: { label: "SPANDEX", type: "fiber", functionalSignificance: true, active: true },
+    leather: { label: "LEATHER", type: "animal-nontextile", active: true },
+  },
+  eu: {
+    polyester_coated: { label: "POLYESTER", type: "fiber", active: true },
+    polyester_uncoated: { label: "POLYESTER", type: "fiber", active: true },
+    polyurethane: { label: "POLYURETHANE", type: "custom-warning", active: true },
+    nylon: { label: "POLYAMIDE", type: "fiber", active: true },
+    kevlar: { label: "ARAMID", type: "fiber", active: true },
+    spandex: { label: "ELASTANE", type: "fiber", active: true },
+    leather: { label: "LEATHER", type: "animal-nontextile", active: true },
+  },
+};
+
+const DEFAULT_CARE_LABEL_OPTIONS = {
+  showPreview: true,
+  strictFTC: false,
+  includeInternal: false,
+  includeUs: true,
+  includeEu: true,
+  singleLine: false,
+  includeWarnings: true,
+};
 
 const DEFAULT_COMPOSITIONS = [
   { label: "NYLON90%+SPANDEX10%", components: { nylon: 90, spandex: 10 } },
@@ -97,7 +139,10 @@ function bindElements() {
     "resetAllBtn", "unmappedList", "dbEditBtn", "dbSaveLockBtn", "dbCancelBtn", "dbBackupBtn", "dbWarning",
     "validationArea", "materialSearchInput", "addMaterialBtn", "materialTableBody",
     "compositionSearchInput", "addCompositionBtn", "compositionList", "fabricDbSearchInput",
-    "fabricSortSelect", "addFabricBtn", "fabricDbTableBody",
+    "fabricSortSelect", "addFabricBtn", "fabricDbTableBody", "carePreviewToggle",
+    "usStrictFtcToggle", "includeInternalToggle", "includeUsToggle", "includeEuToggle",
+    "singleLineToggle", "includeWarningsToggle", "resetCareMappingBtn", "careMappingTableBody",
+    "currentCareLabelArea",
   ].forEach((id) => { els[id] = document.getElementById(id); });
 }
 
@@ -136,6 +181,12 @@ function bindEvents() {
   els.compositionSearchInput.addEventListener("input", renderCompositionDb);
   els.fabricDbSearchInput.addEventListener("input", renderFabricDb);
   els.fabricSortSelect.addEventListener("change", renderFabricDb);
+  [
+    els.carePreviewToggle, els.usStrictFtcToggle, els.includeInternalToggle, els.includeUsToggle,
+    els.includeEuToggle, els.singleLineToggle, els.includeWarningsToggle,
+  ].filter(Boolean).forEach((input) => input.addEventListener("change", handleCareLabelOptionChange));
+  els.resetCareMappingBtn.addEventListener("click", resetCareLabelMappings);
+  els.resultArea.addEventListener("click", handleResultAreaClick);
 }
 
 function loadStore() {
@@ -149,11 +200,11 @@ function loadStore() {
     const parsed = JSON.parse(raw);
     if (!parsed || parsed.version !== STORAGE_VERSION) {
       localStorage.setItem(MIGRATION_BACKUP_KEY, raw);
-      const migrated = migrateToV2(parsed);
+      const migrated = migrateToV3(parsed);
       saveStore(migrated);
       return migrated;
     }
-    normalizeV2Store(parsed);
+    normalizeV3Store(parsed);
     return parsed;
   } catch {
     return fallback;
@@ -169,6 +220,8 @@ function createInitialStore() {
     fabrics: createDefaultFabrics(),
     styles: { [SAMPLE_STYLE.name]: cloneStyle(SAMPLE_STYLE) },
     unmappedFabrics: [],
+    careLabelMappings: clone(DEFAULT_CARE_LABEL_MAPPINGS),
+    careLabelOptions: clone(DEFAULT_CARE_LABEL_OPTIONS),
   };
 }
 
@@ -214,7 +267,14 @@ function migrateToV2(oldData) {
   return store;
 }
 
-function normalizeV2Store(store) {
+function migrateToV3(data) {
+  const store = data?.version === 2 ? data : migrateToV2(data);
+  normalizeV3Store(store);
+  store.version = STORAGE_VERSION;
+  return store;
+}
+
+function normalizeV3Store(store) {
   store.materials = Array.isArray(store.materials) ? store.materials : clone(DEFAULT_MATERIALS);
   store.compositions = Array.isArray(store.compositions) ? store.compositions : clone(DEFAULT_COMPOSITIONS);
   store.fabrics = Array.isArray(store.fabrics) ? store.fabrics : createDefaultFabrics();
@@ -223,6 +283,8 @@ function normalizeV2Store(store) {
   }
   store.styles = store.styles && typeof store.styles === "object" ? store.styles : {};
   store.unmappedFabrics = Array.isArray(store.unmappedFabrics) ? store.unmappedFabrics : [];
+  store.careLabelMappings = normalizeCareLabelMappings(store.careLabelMappings, store.materials);
+  store.careLabelOptions = { ...clone(DEFAULT_CARE_LABEL_OPTIONS), ...(store.careLabelOptions || {}) };
 }
 
 function saveStore(store = appState) {
@@ -232,6 +294,7 @@ function saveStore(store = appState) {
 }
 
 function renderAll() {
+  setCareLabelOptionsToUi();
   renderFabricTable();
   renderSavedStyles();
   renderDbManagement();
@@ -329,6 +392,164 @@ function emptyMaterialMap() {
   }, {});
 }
 
+function normalizeCareLabelMappings(source, materials = appState?.materials || DEFAULT_MATERIALS) {
+  const normalized = clone(DEFAULT_CARE_LABEL_MAPPINGS);
+  CARE_LABEL_MODES.forEach((mode) => {
+    normalized[mode] = normalized[mode] || {};
+    getMaterialIdsFromDefaultsAndStore(materials).forEach((materialId) => {
+      const materialName = materials.find((material) => material.id === materialId)?.name || materialId;
+      const fallback = normalized[mode][materialId] || { label: materialName, type: "fiber", active: true };
+      const incoming = source?.[mode]?.[materialId] || {};
+      normalized[mode][materialId] = {
+        ...fallback,
+        ...incoming,
+        label: String(incoming.label ?? fallback.label ?? materialName).trim().toUpperCase(),
+        type: CARE_LABEL_TYPES.includes(incoming.type || fallback.type) ? incoming.type || fallback.type : "fiber",
+        active: incoming.active !== false,
+        functionalSignificance: Boolean(incoming.functionalSignificance ?? fallback.functionalSignificance),
+      };
+    });
+  });
+  return normalized;
+}
+
+function getMaterialIdsFromDefaultsAndStore(materials = appState?.materials || DEFAULT_MATERIALS) {
+  const ids = new Set(DEFAULT_MATERIALS.map((material) => material.id));
+  if (Array.isArray(materials)) {
+    materials.forEach((material) => ids.add(material.id));
+  }
+  return Array.from(ids);
+}
+
+function getCareLabelOptionsFromUi() {
+  return {
+    showPreview: els.carePreviewToggle?.checked ?? appState.careLabelOptions.showPreview,
+    strictFTC: els.usStrictFtcToggle?.checked ?? appState.careLabelOptions.strictFTC,
+    includeInternal: els.includeInternalToggle?.checked ?? appState.careLabelOptions.includeInternal,
+    includeUs: els.includeUsToggle?.checked ?? appState.careLabelOptions.includeUs,
+    includeEu: els.includeEuToggle?.checked ?? appState.careLabelOptions.includeEu,
+    singleLine: els.singleLineToggle?.checked ?? appState.careLabelOptions.singleLine,
+    includeWarnings: els.includeWarningsToggle?.checked ?? appState.careLabelOptions.includeWarnings,
+  };
+}
+
+function setCareLabelOptionsToUi() {
+  const options = appState.careLabelOptions || DEFAULT_CARE_LABEL_OPTIONS;
+  if (els.carePreviewToggle) els.carePreviewToggle.checked = Boolean(options.showPreview);
+  if (els.usStrictFtcToggle) els.usStrictFtcToggle.checked = Boolean(options.strictFTC);
+  if (els.includeInternalToggle) els.includeInternalToggle.checked = Boolean(options.includeInternal);
+  if (els.includeUsToggle) els.includeUsToggle.checked = Boolean(options.includeUs);
+  if (els.includeEuToggle) els.includeEuToggle.checked = Boolean(options.includeEu);
+  if (els.singleLineToggle) els.singleLineToggle.checked = Boolean(options.singleLine);
+  if (els.includeWarningsToggle) els.includeWarningsToggle.checked = Boolean(options.includeWarnings);
+}
+
+function handleCareLabelOptionChange() {
+  appState.careLabelOptions = getCareLabelOptionsFromUi();
+  saveStore();
+  updateSummary();
+  if (lastExtractedStyles.length) renderResults(lastExtractedStyles);
+}
+
+function getSelectedCareLabelModes(options = getCareLabelOptionsFromUi(), includeInternalOverride = false) {
+  return [
+    ...(options.includeInternal || includeInternalOverride ? ["internal"] : []),
+    ...(options.includeUs ? ["us"] : []),
+    ...(options.includeEu ? ["eu"] : []),
+  ];
+}
+
+function generateCareLabel(totals, mode, options = {}) {
+  const modeMappings = appState.careLabelMappings?.[mode] || {};
+  const aggregate = new Map();
+  const warnings = [];
+  const notes = [];
+  const animalLabels = [];
+
+  getMaterials().forEach((material) => {
+    const value = Number(totals?.[material.id] || 0);
+    if (!(value > 0)) return;
+    const mapping = modeMappings[material.id] || { label: material.name, type: "fiber", active: true };
+    if (mapping.active === false) return;
+    const label = String(mapping.label || material.name).trim().toUpperCase();
+    if (!label) return;
+    if (mapping.type === "animal-nontextile") {
+      animalLabels.push(label);
+      return;
+    }
+    const existing = aggregate.get(label) || { label, value: 0, type: mapping.type, functionalSignificance: false };
+    existing.value += value;
+    existing.type = existing.type === "custom-warning" || mapping.type === "custom-warning" ? "custom-warning" : "fiber";
+    existing.functionalSignificance = existing.functionalSignificance || Boolean(mapping.functionalSignificance);
+    aggregate.set(label, existing);
+  });
+
+  let items = Array.from(aggregate.values()).filter((item) => item.value > 0);
+
+  if (mode === "us" && options.strictFTC) {
+    const other = { label: "OTHER FIBER", value: 0, type: "fiber", functionalSignificance: false };
+    items = items.filter((item) => {
+      if (item.value < 0.05 && !item.functionalSignificance) {
+        other.value += item.value;
+        return false;
+      }
+      return true;
+    });
+    if (other.value > 0) items.push(other);
+  }
+
+  items.forEach((item) => {
+    if (item.type === "custom-warning") {
+      warnings.push(`Warning: ${item.label} is currently treated as a custom care-label term. Verify legal suitability before use.`);
+    }
+  });
+
+  if (animalLabels.length) {
+    if (mode === "eu") notes.push("Contains non-textile parts of animal origin");
+    if (mode === "us" && options.includeUsAnimalNote) notes.push(`Contains ${animalLabels.join(", ")}`);
+    if (mode === "internal") notes.push(`Animal/non-textile item excluded from fibre lines: ${animalLabels.join(", ")}`);
+  }
+
+  items.sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+  const rounded = allocateIntegerPercentages(items);
+  const lines = rounded.map((item) => ({ label: item.label, percent: item.percent }));
+  const totalPercent = lines.reduce((sum, item) => sum + item.percent, 0);
+  const delimiter = options.singleLine ? " / " : "\n";
+  const text = lines.length ? lines.map((item) => `${item.label} ${item.percent}%`).join(delimiter) : "No care label content available";
+  if (lines.length && totalPercent !== 100) warnings.push(`Warning: care label integer total is ${totalPercent}%, expected 100%.`);
+
+  return {
+    mode,
+    title: `${mode.toUpperCase()} CARE LABEL`,
+    lines,
+    text,
+    warnings: [...new Set(warnings)],
+    notes: [...new Set(notes)],
+    totalPercent,
+    isValid: !lines.length || totalPercent === 100,
+  };
+}
+
+function allocateIntegerPercentages(items) {
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  if (!(total > 0)) return [];
+  const prepared = items.map((item, index) => {
+    const exact = (item.value / total) * 100;
+    return { ...item, exact, percent: Math.floor(exact), remainder: exact - Math.floor(exact), index };
+  });
+  let remaining = 100 - prepared.reduce((sum, item) => sum + item.percent, 0);
+  prepared
+    .slice()
+    .sort((a, b) => b.remainder - a.remainder || b.value - a.value || a.label.localeCompare(b.label) || a.index - b.index)
+    .forEach((item) => {
+      if (remaining > 0) {
+        prepared[item.index].percent += 1;
+        remaining -= 1;
+      }
+    });
+  return prepared.sort((a, b) => b.percent - a.percent || b.value - a.value || a.label.localeCompare(b.label));
+}
+
 function renderFabricTable() {
   const materials = getMaterials();
   const query = els.fabricSearchInput.value.trim().toLowerCase();
@@ -416,6 +637,7 @@ function updateSummary(existingCalculation) {
     els.summaryTableBody.append(createSummaryRow(material.name, formatPercent(calculation.totals[material.id], 2)));
   });
   els.summaryTableBody.append(createSummaryRow("Total", formatPercent(calculation.grandTotal, 2), true));
+  renderCurrentCareLabelGenerator(calculation);
 }
 
 function createSummaryRow(label, value, isTotal = false) {
@@ -423,6 +645,25 @@ function createSummaryRow(label, value, isTotal = false) {
   if (isTotal) tr.classList.add("total-row");
   tr.innerHTML = `<td>${escapeHtml(label)}</td><td>${value}</td>`;
   return tr;
+}
+
+function renderCurrentCareLabelGenerator(calculation) {
+  if (!els.currentCareLabelArea) return;
+  const options = { ...getCareLabelOptionsFromUi(), includeInternal: false, includeUs: true, includeEu: true, singleLine: false };
+  const labels = ["us", "eu"].map((mode) => generateCareLabel(calculation.totals, mode, options));
+  els.currentCareLabelArea.innerHTML = `
+    <section class="live-care-generator">
+      <h3>CARE LABEL AUTO GENERATOR</h3>
+      ${labels.map((label) => `
+        <article class="live-care-card">
+          <strong>${escapeHtml(label.title)}</strong>
+          <pre>${escapeHtml(label.text)}</pre>
+          ${label.warnings.length ? `<p class="live-care-warning">${escapeHtml(label.warnings[0])}</p>` : ""}
+          ${label.notes.length ? `<p class="live-care-note">${escapeHtml(label.notes[0])}</p>` : ""}
+        </article>
+      `).join("")}
+    </section>
+  `;
 }
 
 function renderSavedStyles() {
@@ -544,12 +785,15 @@ function renderResults(styles) {
   lastExtractedStyles = styles.map(cloneStyle);
   els.resultArea.innerHTML = "";
   const materials = getMaterials();
+  const options = getCareLabelOptionsFromUi();
   styles.forEach((style) => {
     const calculation = calculateStyle(style);
+    const careLabels = getSelectedCareLabelModes(options).map((mode) => generateCareLabel(calculation.totals, mode, options));
     const section = document.createElement("section");
     section.className = "result-section";
     section.innerHTML = `
       <h3>STYLE / ${escapeHtml(style.name)}</h3>
+      ${options.showPreview ? renderCareLabelPreview(careLabels, options) : ""}
       <div class="result-grid">
         <div class="result-table-wrap">
           <table class="result-table">
@@ -586,10 +830,45 @@ function renderResults(styles) {
   activateTab("results");
 }
 
+function renderCareLabelPreview(careLabels, options) {
+  if (!careLabels.length) return "";
+  return `
+    <section class="care-label-preview">
+      <h4>CARE LABEL AUTO GENERATOR</h4>
+      <div class="care-label-grid">
+        ${careLabels.map((label) => `
+          <article class="care-label-card">
+            <div class="care-label-card-head">
+              <strong>${escapeHtml(label.title)}</strong>
+              <button type="button" class="mini-button" data-copy-care-label="${escapeAttribute(encodeURIComponent(label.text))}">Copy</button>
+            </div>
+            <pre>${escapeHtml(label.text)}</pre>
+            ${options.includeWarnings && label.warnings.length ? `<div class="care-label-message warning"><strong>Warnings</strong>${label.warnings.map((item) => `<p>${escapeHtml(item)}</p>`).join("")}</div>` : ""}
+            ${label.notes.length ? `<div class="care-label-message note"><strong>Notes</strong>${label.notes.map((item) => `<p>${escapeHtml(item)}</p>`).join("")}</div>` : ""}
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+async function handleResultAreaClick(event) {
+  const button = event.target.closest("[data-copy-care-label]");
+  if (!button) return;
+  const text = decodeURIComponent(button.dataset.copyCareLabel || "");
+  try {
+    await navigator.clipboard.writeText(text);
+    showMessage("CARE LABEL 문구를 복사했습니다.");
+  } catch {
+    showMessage("복사에 실패했습니다. 브라우저 권한을 확인하세요.", "error");
+  }
+}
+
 function renderDbManagement() {
   renderMaterialDb();
   renderCompositionDb();
   renderFabricDb();
+  renderCareMappingDb();
   updateDbModeUi();
 }
 
@@ -668,7 +947,11 @@ function addMaterial() {
     showMessage("이미 존재하는 Material입니다.", "error");
     return;
   }
-  appState.materials.push({ id: uniqueId(slugify(cleanName), appState.materials.map((item) => item.id)), name: cleanName, order: nextOrder(appState.materials) });
+  const id = uniqueId(slugify(cleanName), appState.materials.map((item) => item.id));
+  appState.materials.push({ id, name: cleanName, order: nextOrder(appState.materials) });
+  CARE_LABEL_MODES.forEach((mode) => {
+    appState.careLabelMappings[mode][id] = { label: cleanName, type: "fiber", active: true };
+  });
   renderAll();
 }
 
@@ -875,6 +1158,63 @@ function deleteFabric(id) {
   renderAll();
 }
 
+function renderCareMappingDb() {
+  if (!els.careMappingTableBody) return;
+  appState.careLabelMappings = normalizeCareLabelMappings(appState.careLabelMappings);
+  els.careMappingTableBody.innerHTML = getMaterials().map((material) => {
+    const internal = appState.careLabelMappings.internal[material.id];
+    const us = appState.careLabelMappings.us[material.id];
+    const eu = appState.careLabelMappings.eu[material.id];
+    return `
+      <tr>
+        <td><strong>${escapeHtml(material.name)}</strong><br><span class="muted-cell">${escapeHtml(material.id)}</span></td>
+        <td><input data-db-input data-care-label-mode="internal" data-care-label-field="label" data-material-id="${escapeAttribute(material.id)}" type="text" value="${escapeAttribute(internal.label)}"></td>
+        <td>${careTypeSelect("internal", material.id, internal.type)}</td>
+        <td><input data-db-input data-care-label-mode="us" data-care-label-field="label" data-material-id="${escapeAttribute(material.id)}" type="text" value="${escapeAttribute(us.label)}"></td>
+        <td>${careTypeSelect("us", material.id, us.type)}</td>
+        <td><input data-db-input data-care-label-mode="us" data-care-label-field="functionalSignificance" data-material-id="${escapeAttribute(material.id)}" type="checkbox" ${us.functionalSignificance ? "checked" : ""}></td>
+        <td><input data-db-input data-care-label-mode="eu" data-care-label-field="label" data-material-id="${escapeAttribute(material.id)}" type="text" value="${escapeAttribute(eu.label)}"></td>
+        <td>${careTypeSelect("eu", material.id, eu.type)}</td>
+        <td>
+          ${CARE_LABEL_MODES.map((mode) => `
+            <label class="inline-check"><input data-db-input data-care-label-mode="${mode}" data-care-label-field="active" data-material-id="${escapeAttribute(material.id)}" type="checkbox" ${appState.careLabelMappings[mode][material.id].active !== false ? "checked" : ""}> ${mode.toUpperCase()}</label>
+          `).join("")}
+        </td>
+      </tr>
+    `;
+  }).join("");
+  els.careMappingTableBody.querySelectorAll("[data-care-label-field]").forEach((input) => input.addEventListener("change", updateCareLabelMapping));
+  els.careMappingTableBody.querySelectorAll('input[type="text"][data-care-label-field]').forEach((input) => input.addEventListener("input", updateCareLabelMapping));
+  updateDbModeUi();
+}
+
+function careTypeSelect(mode, materialId, value) {
+  return `
+    <select data-db-input data-care-label-mode="${mode}" data-care-label-field="type" data-material-id="${escapeAttribute(materialId)}">
+      ${CARE_LABEL_TYPES.map((type) => `<option value="${type}" ${type === value ? "selected" : ""}>${type}</option>`).join("")}
+    </select>
+  `;
+}
+
+function updateCareLabelMapping(event) {
+  if (!dbEditMode) return;
+  const { careLabelMode: mode, careLabelField: field, materialId } = event.target.dataset;
+  const mapping = appState.careLabelMappings?.[mode]?.[materialId];
+  if (!mapping) return;
+  if (field === "label") mapping.label = event.target.value.trim().toUpperCase();
+  if (field === "type") mapping.type = event.target.value;
+  if (field === "functionalSignificance") mapping.functionalSignificance = event.target.checked;
+  if (field === "active") mapping.active = event.target.checked;
+  updateSummary();
+}
+
+function resetCareLabelMappings() {
+  if (!dbEditMode || !confirm("CARE LABEL mapping을 기본값으로 복원할까요?")) return;
+  appState.careLabelMappings = normalizeCareLabelMappings(DEFAULT_CARE_LABEL_MAPPINGS);
+  renderCareMappingDb();
+  updateSummary();
+}
+
 function validateDb() {
   const errors = [];
   const materialNames = new Set();
@@ -908,6 +1248,15 @@ function validateDb() {
     fabricNames.add(key);
     if (!fabric.compositionId || !getComposition(fabric.compositionId)) errors.push(`${fabric.name}: Composition을 선택하세요.`);
   });
+  CARE_LABEL_MODES.forEach((mode) => {
+    const mappings = appState.careLabelMappings?.[mode] || {};
+    appState.materials.forEach((material) => {
+      const mapping = mappings[material.id];
+      if (!mapping) errors.push(`${mode.toUpperCase()} mapping 누락: ${material.name}`);
+      if (mapping && !String(mapping.label || "").trim()) errors.push(`${mode.toUpperCase()} label이 비어 있습니다: ${material.name}`);
+      if (mapping && !CARE_LABEL_TYPES.includes(mapping.type)) errors.push(`${mode.toUpperCase()} type을 선택하세요: ${material.name}`);
+    });
+  });
   return [...new Set(errors)];
 }
 
@@ -931,8 +1280,8 @@ function importJson(event) {
   reader.onload = () => {
     try {
       const parsed = JSON.parse(reader.result);
-      const nextStore = parsed.version === STORAGE_VERSION ? parsed : migrateToV2(parsed);
-      normalizeV2Store(nextStore);
+      const nextStore = parsed.version === STORAGE_VERSION ? parsed : migrateToV3(parsed);
+      normalizeV3Store(nextStore);
       const errors = validateStoreShape(nextStore);
       if (errors.length) throw new Error(errors.join("\n"));
       if (!confirm("JSON 백업 내용으로 현재 저장 데이터를 교체할까요?")) return;
@@ -1020,6 +1369,11 @@ function downloadCsv(inputStyles) {
 async function downloadXlsx(inputStyles) {
   const styles = inputStyles || getStylesForDownload();
   if (!styles.length) return;
+  const careLabelErrors = validateCareLabelsForExport(styles);
+  if (careLabelErrors.length) {
+    showMessage(careLabelErrors[0], "error");
+    return;
+  }
   if (!window.ExcelJS) {
     showMessage("ExcelJS 라이브러리가 로드되지 않았습니다. 인터넷 연결을 확인하거나 CSV 다운로드를 사용하세요.", "error");
     return;
@@ -1047,7 +1401,7 @@ function createXlsxWorkbook(styles, ExcelJS) {
 
 function addSummaryWorksheet(workbook, entries) {
   const materials = getMaterials();
-  const lastColumn = 3 + materials.length;
+  const lastColumn = 5 + materials.length;
   const sheet = workbook.addWorksheet("Summary", {
     views: [{ state: "frozen", ySplit: 3, showGridLines: false }],
     pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
@@ -1058,19 +1412,22 @@ function addSummaryWorksheet(workbook, entries) {
   setCell(sheet, 1, 1, "FABRIC COMPOSITION SUMMARY", titleStyle(16));
   sheet.getRow(1).height = 28;
   const headerRow = 3;
-  ["STYLE", "Total YY", ...materials.map((material) => material.name), "Total"].forEach((header, index) => setCell(sheet, headerRow, index + 1, header, tableHeaderStyle()));
+  ["STYLE", "Total YY", ...materials.map((material) => material.name), "Total", "US CARE LABEL", "EU CARE LABEL"].forEach((header, index) => setCell(sheet, headerRow, index + 1, header, tableHeaderStyle()));
   sheet.getRow(headerRow).height = 26;
   entries.forEach((entry, index) => {
     const rowNumber = headerRow + index + 1;
+    const careLabels = createExportCareLabels(entry.calculation);
     setCell(sheet, rowNumber, 1, entry.style.name, dataCellStyle(null, "left"));
     setCell(sheet, rowNumber, 2, entry.calculation.totalYy, dataCellStyle("0.000", "right"));
     materials.forEach((material, materialIndex) => {
       setCell(sheet, rowNumber, materialIndex + 3, entry.calculation.totals[material.id], dataCellStyle("0.00%", "right"));
     });
-    setCell(sheet, rowNumber, lastColumn, 1, dataCellStyle("0.00%", "right"));
-    sheet.getRow(rowNumber).height = 22;
+    setCell(sheet, rowNumber, 3 + materials.length, 1, dataCellStyle("0.00%", "right"));
+    setCell(sheet, rowNumber, 4 + materials.length, careLabels.us.text.replace(/\n/g, " / "), dataCellStyle(null, "left"));
+    setCell(sheet, rowNumber, 5 + materials.length, careLabels.eu.text.replace(/\n/g, " / "), dataCellStyle(null, "left"));
+    sheet.getRow(rowNumber).height = 42;
   });
-  sheet.columns = [{ width: 36 }, { width: 12 }, ...materials.map(() => ({ width: 18 })), { width: 12 }];
+  sheet.columns = [{ width: 36 }, { width: 12 }, ...materials.map(() => ({ width: 18 })), { width: 12 }, { width: 42 }, { width: 42 }];
   sheet.autoFilter = { from: { row: headerRow, column: 1 }, to: { row: headerRow + Math.max(entries.length, 1), column: lastColumn } };
 }
 
@@ -1116,8 +1473,67 @@ function addStyleWorksheet(workbook, entry, useUniqueNames) {
   setCell(sheet, summaryHeaderRow + materials.length + 1, 1, "Total", totalRowStyle());
   setCell(sheet, summaryHeaderRow + materials.length + 1, 2, 1, totalRowStyle("0.00%"));
 
+  addCareLabelBlocks(sheet, entry, summaryHeaderRow, materials.length + 2, lastColumn);
+
   sheet.columns = [{ width: 55 }, { width: 36 }, { width: 10 }, { width: 10 }, ...materials.map(() => ({ width: 18 }))];
   sheet.autoFilter = { from: { row: detailHeaderRow, column: 1 }, to: { row: detailHeaderRow + Math.max(calculation.usedRows.length, 1), column: lastColumn } };
+}
+
+function createExportCareLabels(calculation) {
+  const options = { ...getCareLabelOptionsFromUi(), singleLine: false, includeWarnings: true };
+  return {
+    us: generateCareLabel(calculation.totals, "us", options),
+    eu: generateCareLabel(calculation.totals, "eu", options),
+  };
+}
+
+function validateCareLabelsForExport(styles) {
+  const errors = [];
+  styles.forEach((style) => {
+    const calculation = calculateStyle(style);
+    const labels = createExportCareLabels(calculation);
+    Object.values(labels).forEach((label) => {
+      if (!label.isValid) errors.push(`${style.name}: ${label.title} integer total is ${label.totalPercent}%, expected 100%.`);
+    });
+  });
+  return errors;
+}
+
+function addCareLabelBlocks(sheet, entry, summaryHeaderRow, summaryHeight, lastColumn) {
+  const labels = createExportCareLabels(entry.calculation);
+  const startColumn = lastColumn >= 8 ? 4 : 1;
+  const startRow = startColumn > 1 ? summaryHeaderRow : summaryHeaderRow + summaryHeight + 3;
+  addCareLabelBlock(sheet, startRow, startColumn, entry.style.name, labels.us);
+  addCareLabelBlock(sheet, startRow, startColumn + 4, entry.style.name, labels.eu);
+}
+
+function addCareLabelBlock(sheet, startRow, startColumn, styleName, label) {
+  const options = getCareLabelOptionsFromUi();
+  const endColumn = startColumn + 2;
+  sheet.mergeCells(startRow, startColumn, startRow, endColumn);
+  setCell(sheet, startRow, startColumn, "CARE LABEL", careLabelHeaderStyle());
+  sheet.mergeCells(startRow + 1, startColumn, startRow + 1, endColumn);
+  setCell(sheet, startRow + 1, startColumn, `<${styleName}>`, careLabelStyleNameStyle());
+  sheet.mergeCells(startRow + 2, startColumn, startRow + 2, endColumn);
+  setCell(sheet, startRow + 2, startColumn, label.title, careLabelSubHeaderStyle());
+  sheet.mergeCells(startRow + 3, startColumn, startRow + 3, startColumn + 1);
+  setCell(sheet, startRow + 3, startColumn, "LABEL", careLabelTableHeaderStyle());
+  setCell(sheet, startRow + 3, endColumn, "%", careLabelTableHeaderStyle());
+  const rows = label.lines.length ? label.lines : [{ label: "No care label content available", percent: "" }];
+  rows.forEach((line, index) => {
+    const rowNumber = startRow + 4 + index;
+    sheet.mergeCells(rowNumber, startColumn, rowNumber, startColumn + 1);
+    setCell(sheet, rowNumber, startColumn, line.label, careLabelBodyStyle());
+    setCell(sheet, rowNumber, endColumn, line.percent === "" ? "" : `${line.percent}%`, careLabelPercentStyle());
+    sheet.getRow(rowNumber).height = 22;
+  });
+  const messageLines = [...(options.includeWarnings ? label.warnings : []), ...label.notes];
+  const messageRow = startRow + 4 + rows.length;
+  if (messageLines.length) {
+    sheet.mergeCells(messageRow, startColumn, messageRow, endColumn);
+    setCell(sheet, messageRow, startColumn, messageLines.join("\n"), careLabelNoteStyle());
+    sheet.getRow(messageRow).height = Math.max(22, messageLines.length * 16);
+  }
 }
 
 function setCell(sheet, rowNumber, columnNumber, value, style = {}) {
@@ -1149,6 +1565,34 @@ function dataCellStyle(numFmt, horizontal = "left") {
 
 function totalRowStyle(numFmt) {
   return { font: { name: "Calibri", bold: true, color: { argb: "FF17324D" } }, fill: fill("FFFFE699"), alignment: { vertical: "middle", horizontal: "right", wrapText: true }, border: thinBorder(), ...(numFmt ? { numFmt } : {}) };
+}
+
+function careLabelHeaderStyle() {
+  return { font: { name: "Calibri", bold: true, color: { argb: "FFFFFFFF" }, size: 13 }, fill: fill("FF0F6F66"), alignment: { vertical: "middle", horizontal: "center", wrapText: true }, border: thinBorder() };
+}
+
+function careLabelStyleNameStyle() {
+  return { font: { name: "Calibri", bold: true, color: { argb: "FF17324D" } }, fill: fill("FFDDEBF7"), alignment: { vertical: "middle", horizontal: "center", wrapText: true }, border: thinBorder() };
+}
+
+function careLabelSubHeaderStyle() {
+  return { font: { name: "Calibri", bold: true, color: { argb: "FFFFFFFF" } }, fill: fill("FF5B6F8C"), alignment: { vertical: "middle", horizontal: "center", wrapText: true }, border: thinBorder() };
+}
+
+function careLabelBodyStyle() {
+  return { font: { name: "Calibri", size: 12, bold: true }, alignment: { vertical: "top", horizontal: "left", wrapText: true }, border: thinBorder() };
+}
+
+function careLabelTableHeaderStyle() {
+  return { font: { name: "Calibri", bold: true, color: { argb: "FFFFFFFF" } }, fill: fill("FF7A8A99"), alignment: { vertical: "middle", horizontal: "center", wrapText: true }, border: thinBorder() };
+}
+
+function careLabelPercentStyle() {
+  return { font: { name: "Calibri", size: 12, bold: true }, alignment: { vertical: "middle", horizontal: "right", wrapText: true }, border: thinBorder() };
+}
+
+function careLabelNoteStyle() {
+  return { font: { name: "Calibri", size: 9, italic: true, color: { argb: "FF6B4E00" } }, fill: fill("FFFFF7D6"), alignment: { vertical: "top", horizontal: "left", wrapText: true }, border: thinBorder() };
 }
 
 function fill(argb) {

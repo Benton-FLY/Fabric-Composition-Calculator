@@ -390,6 +390,56 @@ select {
   color: var(--text);
 }
 
+.current-care-label-area {
+  margin-top: 14px;
+}
+
+.live-care-generator h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.live-care-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  margin-top: 8px;
+}
+
+.live-care-card > strong {
+  display: block;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--header);
+}
+
+.live-care-card pre {
+  margin: 0;
+  padding: 10px;
+  font: 700 13px/1.5 Arial, "Noto Sans KR", sans-serif;
+  white-space: pre-wrap;
+}
+
+.live-care-warning,
+.live-care-note {
+  margin: 0 10px 10px;
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-size: 11px;
+}
+
+.live-care-warning {
+  border: 1px solid #f0d98c;
+  background: var(--warn);
+  color: #6b4e00;
+}
+
+.live-care-note {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: var(--muted);
+}
+
 .panel-title-row,
 .db-toolbar {
   display: flex;
@@ -461,6 +511,29 @@ select {
   border-bottom: 1px solid var(--line);
 }
 
+.care-label-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #f9fafb;
+}
+
+.care-label-options label,
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.care-label-options input,
+.inline-check input {
+  width: auto;
+  min-height: auto;
+}
+
 .result-area {
   padding: 14px;
 }
@@ -485,6 +558,68 @@ select {
   grid-template-columns: minmax(0, 1fr) 280px;
   gap: 14px;
   align-items: start;
+}
+
+.care-label-preview {
+  margin: 0 0 16px;
+}
+
+.care-label-preview h4 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.care-label-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.care-label-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.care-label-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--header);
+}
+
+.care-label-card pre {
+  min-height: 116px;
+  margin: 0;
+  padding: 12px;
+  font: 700 14px/1.55 Arial, "Noto Sans KR", sans-serif;
+  white-space: pre-wrap;
+}
+
+.care-label-message {
+  margin: 0 10px 10px;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.care-label-message p {
+  margin: 4px 0 0;
+}
+
+.care-label-message.warning {
+  border: 1px solid #f0d98c;
+  background: var(--warn);
+  color: #6b4e00;
+}
+
+.care-label-message.note {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: var(--muted);
 }
 
 .result-table-wrap {

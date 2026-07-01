@@ -69,6 +69,7 @@
             <table class="summary-table">
               <tbody id="summaryTableBody"></tbody>
             </table>
+            <div id="currentCareLabelArea" class="current-care-label-area"></div>
           </aside>
         </div>
       </section>
@@ -99,6 +100,15 @@
               <button type="button" id="downloadXlsxBtn">XLSX 다운로드</button>
             </div>
           </div>
+          <div class="care-label-options" aria-label="Care label options">
+            <label><input id="carePreviewToggle" type="checkbox"> Show care label preview</label>
+            <label><input id="usStrictFtcToggle" type="checkbox"> US Strict FTC Mode</label>
+            <label><input id="includeInternalToggle" type="checkbox"> Include INTERNAL label</label>
+            <label><input id="includeUsToggle" type="checkbox"> Include US label</label>
+            <label><input id="includeEuToggle" type="checkbox"> Include EU label</label>
+            <label><input id="singleLineToggle" type="checkbox"> Single line</label>
+            <label><input id="includeWarningsToggle" type="checkbox"> Include warnings</label>
+          </div>
           <div id="resultArea" class="result-area">
             <p class="empty-state">추출할 스타일을 선택하거나 현재 스타일을 추출하세요.</p>
           </div>
@@ -125,6 +135,7 @@
           <button type="button" class="sub-tab active" data-db-tab="materials">Material DB</button>
           <button type="button" class="sub-tab" data-db-tab="compositions">Composition DB</button>
           <button type="button" class="sub-tab" data-db-tab="fabrics">Fabric DB</button>
+          <button type="button" class="sub-tab" data-db-tab="careLabels">Care Label Mapping</button>
         </div>
 
         <section id="materialsDb" class="db-panel active">
@@ -166,6 +177,22 @@
                 <tr><th>No</th><th>Fabric Name</th><th>Composition</th><th>ID</th><th>Action</th></tr>
               </thead>
               <tbody id="fabricDbTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="careLabelsDb" class="db-panel">
+          <div class="toolbar compact">
+            <button type="button" id="resetCareMappingBtn" class="db-edit-only" disabled>Reset default mapping</button>
+          </div>
+          <div class="table-wrap db-table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Material</th><th>Internal label</th><th>Internal type</th><th>US label</th><th>US type</th><th>US functional</th><th>EU label</th><th>EU type</th><th>Active</th>
+                </tr>
+              </thead>
+              <tbody id="careMappingTableBody"></tbody>
             </table>
           </div>
         </section>
