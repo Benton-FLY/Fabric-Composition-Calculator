@@ -644,39 +644,241 @@ function downloadCsv() {
   downloadBlob(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }), `fabric-composition-${dateStamp()}.csv`);
 }
 
-function downloadXlsx() {
+async function downloadXlsx() {
   const styles = getStylesForDownload();
   if (!styles.length) return;
-  if (!window.XLSX) {
-    alert("SheetJS 라이브러리가 로드되지 않았습니다. 인터넷 연결을 확인하거나 CSV 다운로드를 사용하세요.");
+  if (!window.ExcelJS) {
+    alert("ExcelJS 라이브러리가 로드되지 않았습니다. 인터넷 연결을 확인하거나 CSV 다운로드를 사용하세요.");
     return;
   }
 
-  const workbook = window.XLSX.utils.book_new();
-  styles.forEach((style) => {
-    const calculation = calculateStyle(style);
-    const rows = [
-      ["STYLE", style.name],
-      [],
-      ["Fabric Name", "Composition", "YY", "Ratio", ...MATERIALS],
-      ...calculation.usedRows.map((row) => [
-        row.fabricName,
-        row.composition,
-        row.yy,
-        row.ratio,
-        ...MATERIALS.map((material) => row.materialValues[material]),
-      ]),
-      [],
-      ["Summary", "Value"],
-      ["Total YY", calculation.totalYy],
-      ...MATERIALS.map((material) => [material, calculation.totals[material]]),
-      ["Total", calculation.grandTotal],
-    ];
-    const sheet = window.XLSX.utils.aoa_to_sheet(rows);
-    window.XLSX.utils.book_append_sheet(workbook, sheet, safeSheetName(style.name));
+  try {
+    const workbook = createXlsxWorkbook(styles, window.ExcelJS);
+    const buffer = await workbook.xlsx.writeBuffer();
+    downloadBlob(
+      new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+      `fabric-composition-${dateStamp()}.xlsx`,
+    );
+  } catch (error) {
+    alert(`XLSX 다운로드 실패: ${error.message}`);
+  }
+}
+
+function createXlsxWorkbook(styles, ExcelJS) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Fabric Composition Calculator";
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  const calculations = styles.map((style) => ({
+    style: cloneStyle(style),
+    calculation: calculateStyle(style),
+  }));
+
+  if (calculations.length > 1) {
+    addSummaryWorksheet(workbook, calculations);
+  }
+
+  calculations.forEach((entry) => addStyleWorksheet(workbook, entry, calculations.length > 1));
+  return workbook;
+}
+
+function addSummaryWorksheet(workbook, entries) {
+  const sheet = workbook.addWorksheet("Summary", {
+    views: [{ state: "frozen", ySplit: 4 }],
+  });
+  const lastColumn = 4 + MATERIALS.length;
+
+  sheet.mergeCells(1, 1, 1, lastColumn);
+  setCell(sheet, 1, 1, "Fabric Composition Summary", titleStyle());
+  setCell(sheet, 2, 1, "STYLE COUNT", infoLabelStyle());
+  setCell(sheet, 2, 2, entries.length, infoValueStyle());
+  setCell(sheet, 2, 3, "TOTAL YY", infoLabelStyle());
+  setCell(sheet, 2, 4, entries.reduce((sum, entry) => sum + entry.calculation.totalYy, 0), infoValueStyle("0.000"));
+
+  const headerRow = 4;
+  const headers = ["Style", "Total YY", ...MATERIALS, "Total"];
+  headers.forEach((header, index) => setCell(sheet, headerRow, index + 1, header, tableHeaderStyle()));
+
+  entries.forEach((entry, index) => {
+    const rowNumber = headerRow + index + 1;
+    setCell(sheet, rowNumber, 1, entry.style.name, dataCellStyle());
+    setCell(sheet, rowNumber, 2, entry.calculation.totalYy, dataCellStyle("0.000"));
+    MATERIALS.forEach((material, materialIndex) => {
+      setCell(sheet, rowNumber, materialIndex + 3, entry.calculation.totals[material], dataCellStyle("0.00%"));
+    });
+    setCell(sheet, rowNumber, lastColumn, entry.calculation.grandTotal, dataCellStyle("0.00%"));
   });
 
-  window.XLSX.writeFile(workbook, `fabric-composition-${dateStamp()}.xlsx`);
+  const totalRow = headerRow + entries.length + 1;
+  setCell(sheet, totalRow, 1, "Total", totalRowStyle());
+  setCell(sheet, totalRow, 2, entries.reduce((sum, entry) => sum + entry.calculation.totalYy, 0), totalRowStyle("0.000"));
+  MATERIALS.forEach((material, index) => {
+    setCell(
+      sheet,
+      totalRow,
+      index + 3,
+      entries.reduce((sum, entry) => sum + entry.calculation.totals[material], 0),
+      totalRowStyle("0.00%"),
+    );
+  });
+  setCell(
+    sheet,
+    totalRow,
+    lastColumn,
+    entries.reduce((sum, entry) => sum + entry.calculation.grandTotal, 0),
+    totalRowStyle("0.00%"),
+  );
+
+  sheet.columns = [
+    { width: 34 },
+    { width: 14 },
+    ...MATERIALS.map(() => ({ width: 16 })),
+    { width: 14 },
+  ];
+  sheet.autoFilter = {
+    from: { row: headerRow, column: 1 },
+    to: { row: Math.max(headerRow + entries.length, headerRow), column: lastColumn },
+  };
+}
+
+function addStyleWorksheet(workbook, entry, useUniqueNames) {
+  const sheetName = useUniqueNames ? uniqueSheetName(workbook, entry.style.name) : safeSheetName(entry.style.name);
+  const sheet = workbook.addWorksheet(sheetName, {
+    views: [{ state: "frozen", ySplit: 4 }],
+  });
+  const calculation = entry.calculation;
+  const lastColumn = 4 + MATERIALS.length;
+
+  sheet.mergeCells(1, 1, 1, lastColumn);
+  setCell(sheet, 1, 1, `STYLE / ${entry.style.name}`, titleStyle());
+  setCell(sheet, 2, 1, "STYLE", infoLabelStyle());
+  setCell(sheet, 2, 2, entry.style.name, infoValueStyle());
+  setCell(sheet, 2, 3, "TOTAL YY", infoLabelStyle());
+  setCell(sheet, 2, 4, calculation.totalYy, infoValueStyle("0.000"));
+
+  const detailHeaderRow = 4;
+  ["Fabric Name", "Composition", "YY", "Ratio", ...MATERIALS].forEach((header, index) => {
+    setCell(sheet, detailHeaderRow, index + 1, header, tableHeaderStyle());
+  });
+
+  calculation.usedRows.forEach((row, index) => {
+    const rowNumber = detailHeaderRow + index + 1;
+    setCell(sheet, rowNumber, 1, row.fabricName, dataCellStyle());
+    setCell(sheet, rowNumber, 2, row.composition, dataCellStyle());
+    setCell(sheet, rowNumber, 3, row.yy, dataCellStyle("0.000"));
+    setCell(sheet, rowNumber, 4, row.ratio, dataCellStyle("0.00%"));
+    MATERIALS.forEach((material, materialIndex) => {
+      setCell(sheet, rowNumber, materialIndex + 5, row.materialValues[material], dataCellStyle("0.00%"));
+    });
+  });
+
+  const summaryHeaderRow = detailHeaderRow + calculation.usedRows.length + 3;
+  sheet.mergeCells(summaryHeaderRow, 1, summaryHeaderRow, 2);
+  setCell(sheet, summaryHeaderRow, 1, "Summary", tableHeaderStyle());
+  setCell(sheet, summaryHeaderRow + 1, 1, "Total YY", dataCellStyle());
+  setCell(sheet, summaryHeaderRow + 1, 2, calculation.totalYy, dataCellStyle("0.000"));
+  MATERIALS.forEach((material, index) => {
+    setCell(sheet, summaryHeaderRow + index + 2, 1, material, dataCellStyle());
+    setCell(sheet, summaryHeaderRow + index + 2, 2, calculation.totals[material], dataCellStyle("0.00%"));
+  });
+  setCell(sheet, summaryHeaderRow + MATERIALS.length + 2, 1, "Total", totalRowStyle());
+  setCell(sheet, summaryHeaderRow + MATERIALS.length + 2, 2, calculation.grandTotal, totalRowStyle("0.00%"));
+
+  sheet.columns = [
+    { width: 45 },
+    { width: 30 },
+    { width: 12 },
+    { width: 12 },
+    ...MATERIALS.map(() => ({ width: 16 })),
+  ];
+  sheet.autoFilter = {
+    from: { row: detailHeaderRow, column: 1 },
+    to: { row: Math.max(detailHeaderRow + calculation.usedRows.length, detailHeaderRow), column: lastColumn },
+  };
+}
+
+function setCell(sheet, rowNumber, columnNumber, value, style = {}) {
+  const cell = sheet.getCell(rowNumber, columnNumber);
+  cell.value = value;
+  Object.assign(cell, style);
+  return cell;
+}
+
+function titleStyle() {
+  return {
+    font: { bold: true, color: { argb: "FFFFFFFF" }, size: 14 },
+    fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E78" } },
+    alignment: { vertical: "middle", horizontal: "center", wrapText: true },
+    border: thinBorder(),
+  };
+}
+
+function infoLabelStyle() {
+  return {
+    font: { bold: true, color: { argb: "FFFFFFFF" } },
+    fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FF5B6F8C" } },
+    alignment: { vertical: "middle", horizontal: "center", wrapText: true },
+    border: thinBorder(),
+  };
+}
+
+function infoValueStyle(numFmt) {
+  return {
+    font: { bold: true, color: { argb: "FF17324D" } },
+    fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFDDEBF7" } },
+    alignment: { vertical: "middle", horizontal: "center", wrapText: true },
+    border: thinBorder(),
+    ...(numFmt ? { numFmt } : {}),
+  };
+}
+
+function tableHeaderStyle() {
+  return {
+    font: { bold: true, color: { argb: "FF17324D" } },
+    fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFBDD7EE" } },
+    alignment: { vertical: "middle", horizontal: "center", wrapText: true },
+    border: thinBorder(),
+  };
+}
+
+function dataCellStyle(numFmt) {
+  return {
+    alignment: { vertical: "middle", wrapText: true },
+    border: thinBorder(),
+    ...(numFmt ? { numFmt } : {}),
+  };
+}
+
+function totalRowStyle(numFmt) {
+  return {
+    font: { bold: true, color: { argb: "FF17324D" } },
+    fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE699" } },
+    alignment: { vertical: "middle", wrapText: true },
+    border: thinBorder(),
+    ...(numFmt ? { numFmt } : {}),
+  };
+}
+
+function thinBorder() {
+  return {
+    top: { style: "thin", color: { argb: "FFB7B7B7" } },
+    left: { style: "thin", color: { argb: "FFB7B7B7" } },
+    bottom: { style: "thin", color: { argb: "FFB7B7B7" } },
+    right: { style: "thin", color: { argb: "FFB7B7B7" } },
+  };
+}
+
+function uniqueSheetName(workbook, name) {
+  const baseName = safeSheetName(name);
+  let sheetName = baseName;
+  let index = 2;
+  while (workbook.getWorksheet(sheetName)) {
+    const suffix = ` ${index}`;
+    sheetName = `${baseName.slice(0, 31 - suffix.length)}${suffix}`;
+    index += 1;
+  }
+  return sheetName;
 }
 
 function getStylesForDownload() {
