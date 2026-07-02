@@ -663,15 +663,59 @@ select {
 
 .composition-card {
   padding: 12px;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .composition-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
   margin-bottom: 10px;
 }
 
 .composition-head input {
+  min-width: 260px;
   max-width: 420px;
   font-weight: 700;
+}
+
+.composition-components-table {
+  width: auto;
+  min-width: min(100%, 458px);
+  max-width: 100%;
+}
+
+.composition-components-table .composition-component-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) 90px auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.composition-components-table th,
+.composition-components-table td,
+.composition-components-table th:first-child,
+.composition-components-table td:first-child {
+  width: auto;
+  min-width: 0;
+  border-right: 0;
+  text-align: left;
+}
+
+.composition-components-table .material-select {
+  width: 100%;
+  min-width: 260px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composition-components-table .component-ratio-input {
+  width: 90px;
+  max-width: 90px;
+  text-align: right;
 }
 
 .compact-table th,

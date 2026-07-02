@@ -983,17 +983,17 @@ function renderCompositionDb() {
           <button type="button" class="mini-button db-edit-only" data-add-component="${escapeAttribute(composition.id)}">행 추가</button>
           <button type="button" class="mini-button danger db-edit-only" data-delete-composition="${escapeAttribute(composition.id)}">삭제</button>
         </div>
-        <table class="data-table compact-table">
-          <thead><tr><th>Material</th><th>Ratio</th><th>Action</th></tr></thead>
+        <table class="data-table compact-table composition-components-table">
+          <thead><tr class="composition-component-row"><th>Material</th><th>Ratio</th><th>Action</th></tr></thead>
           <tbody>
             ${Object.entries(composition.components || {}).map(([materialId, ratio]) => `
-              <tr>
+              <tr class="composition-component-row">
                 <td>
-                  <select data-db-input data-component-material="${escapeAttribute(composition.id)}" data-old-material="${escapeAttribute(materialId)}">
+                  <select class="material-select" title="${escapeAttribute(getMaterialName(materialId))}" data-db-input data-component-material="${escapeAttribute(composition.id)}" data-old-material="${escapeAttribute(materialId)}">
                     ${materials.map((material) => `<option value="${escapeAttribute(material.id)}" ${material.id === materialId ? "selected" : ""}>${escapeHtml(material.name)}</option>`).join("")}
                   </select>
                 </td>
-                <td><input data-db-input data-component-ratio="${escapeAttribute(composition.id)}" data-material-id="${escapeAttribute(materialId)}" type="number" min="0.001" max="100" step="0.001" value="${Number(ratio)}"></td>
+                <td><input class="component-ratio-input" data-db-input data-component-ratio="${escapeAttribute(composition.id)}" data-material-id="${escapeAttribute(materialId)}" type="number" min="0.001" max="100" step="0.001" value="${Number(ratio)}"></td>
                 <td><button type="button" class="mini-button danger db-edit-only" data-delete-component="${escapeAttribute(composition.id)}" data-material-id="${escapeAttribute(materialId)}">삭제</button></td>
               </tr>
             `).join("")}
