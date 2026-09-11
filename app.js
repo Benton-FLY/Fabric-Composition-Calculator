@@ -1777,7 +1777,7 @@ function cleanStyleName(value) { return String(value).replace(/FLY RACING/ig, ""
 function headerColumn(row, predicate) { return row.findIndex((cell) => predicate(normalizeText(cell))); }
 function makeRecord(material, usage, sizeGroup, sheet, row, col, parsedType) {
   const match = matchFabric(material);
-  return { material: String(material).trim(), usage, sizeGroup, section: sheet, sourceCell: `${sheet}!R${row + 1}C${col + 1}`, sourceSheet: sheet, parsedType, matchedFabricId: match.fabric?.id || null, matchedFabricName: match.fabric?.name || "", composition: match.fabric ? getCompositionLabel(match.fabric.compositionId) : "", matchScore: match.score, confidence: match.confidence, matchType: match.matchType };
+  return { material: String(material).trim(), usage, sizeGroup, section: sheet, sourceCell: `${sheet}!R${row + 1}C${col + 1}`, sourceSheet: sheet, parsedType, matchedFabricId: match.fabric?.id || null, matchedFabricName: match.fabric?.name || "", composition: match.fabric ? getCompositionLabel(match.fabric.compositionId) : "", matchScore: match.score, confidence: match.confidence, matchType: match.matchType, importMatch: { confidence: match.confidence, score: match.score, rule: match.matchType, resolvedByUser: false } };
 }
 function parsePant(matrix, sheetName) {
   const records = []; let materialCol = -1; let usageCol = -1; let currentSize = "DEFAULT";
@@ -1889,7 +1889,28 @@ function renderStyleUploadPreview() {
   els.importUploadPreviewBtn.textContent = files.length > 1 ? "Import All" : "Import";
 }
 function readPreviewEdits() {
-  els.uploadPreviewBody.querySelectorAll("[data-preview-file]").forEach((section) => { const item = pendingUpload.files[Number(section.dataset.previewFile)]; item.styleName = section.querySelector("[data-style-name]").value.trim(); item.detectedType = section.querySelector("[data-file-type]").value; section.querySelectorAll("[data-row-fabric]").forEach((input) => { const row = item.rows[Number(input.dataset.rowFabric)]; const match = matchFabric(input.value); const compositionLabel = section.querySelector(`[data-row-composition="${input.dataset.rowFabric}"]`).value.trim(); const dbComposition = appState.compositions.find((c) => normalizeText(c.label) === normalizeText(compositionLabel)); row.matchedFabricName = input.value.trim(); row.matchedFabricId = match.fabric?.id || null; row.composition = compositionLabel; row.compositionDefinition = dbComposition ? clone(dbComposition) : row.compositionDefinition?.label === compositionLabel ? row.compositionDefinition : null; row.usage = numericUsage(section.querySelector(`[data-row-usage="${input.dataset.rowFabric}"]`).value); row.confidence = match.confidence; }); });
+  els.uploadPreviewBody.querySelectorAll("[data-preview-file]").forEach((section) => { const item = pendingUpload.files[Number(section.dataset.previewFile)]; item.styleName = section.querySelector("[data-style-name]").value.trim(); item.detectedType = section.querySelector("[data-file-type]").value; section.querySelectorAll("[data-row-fabric]").forEach((input) => { const row = item.rows[Number(input.dataset.rowFabric)]; const compositionLabel = section.querySelector(`[data-row-composition="${input.dataset.rowFabric}"]`).value.trim(); updatePreviewRowFromInputs(row, input.value, compositionLabel, section.querySelector(`[data-row-usage="${input.dataset.rowFabric}"]`).value); }); });
+}
+function updatePreviewRowFromInputs(row, fabricValue, compositionLabel, usageValue) {
+  const value = String(fabricValue || "").trim();
+  const originalValue = String(row.matchedFabricName || "").trim();
+  // A preview import is already the result of matching.  Re-match only when the
+  // user actually changed the Fabric field; otherwise preserve UNMATCHED/HIGH
+  // and the exact match metadata produced by the parser.
+  if (row.fabricUserConfirmed || value !== originalValue) {
+    const match = value ? matchFabric(value) : { fabric: null, score: 0, confidence: "UNMATCHED", matchType: "UNMATCHED" };
+    row.matchedFabricName = value;
+    row.matchedFabricId = match.fabric?.id || null;
+    row.matchScore = match.score;
+    row.confidence = match.confidence;
+    row.matchType = match.matchType;
+    if (row.importMatch) row.importMatch.resolvedByUser = true;
+  }
+  const dbComposition = appState.compositions.find((c) => normalizeText(c.label) === normalizeText(compositionLabel));
+  row.composition = String(compositionLabel || "").trim();
+  row.compositionDefinition = dbComposition ? clone(dbComposition) : row.compositionDefinition?.label === row.composition ? row.compositionDefinition : null;
+  row.usage = numericUsage(usageValue);
+  return row;
 }
 function commitUploadPreview() {
   if (!pendingUpload) return; readPreviewEdits();
@@ -1917,11 +1938,13 @@ function createDraftFromImport(preview) {
 }
 function convertPreviewRowToDraftRow(preview, row) {
   const fabric = row.matchedFabricId ? appState.fabrics.find((item) => item.id === row.matchedFabricId) : null;
-  const autoApproved = ["EXACT", "HIGH"].includes(row.confidence) && Boolean(fabric);
+  const originalConfidence = row.importMatch?.confidence || row.confidence || "UNMATCHED";
+  const autoApproved = ["EXACT", "HIGH"].includes(originalConfidence) && Boolean(fabric);
   const explicitlyReviewed = Boolean(row.fabricUserConfirmed || row.compositionUserConfirmed || row.compositionDefinition?.source === "temporary");
   const definition = row.compositionDefinition?.components ? row.compositionDefinition : (autoApproved || row.fabricUserConfirmed) && fabric ? getComposition(fabric.compositionId) : row.compositionUserConfirmed ? appState.compositions.find((item) => normalizeText(item.label) === normalizeText(row.composition)) : null;
-  const reviewRequired = !definition?.components || (["MEDIUM", "LOW", "UNMATCHED"].includes(row.confidence) && !explicitlyReviewed);
-  return { rowId: `row_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, fabricId: reviewRequired && row.confidence === "UNMATCHED" ? null : fabric?.id || null, fabricName: row.matchedFabricName || row.material, compositionId: reviewRequired ? null : definition?.id || null, composition: reviewRequired ? "" : definition?.label || "", compositionDefinition: reviewRequired ? null : clone(definition), yy: numericUsage(row.usage), confidence: row.confidence, matchScore: row.matchScore, importStatus: { originalConfidence: row.confidence, matchScore: row.matchScore, reviewRequired, reviewed: !reviewRequired }, source: { sourceFileName: preview.file.name, sourceSheet: row.sourceSheet, sourceMaterialName: row.material, sourceUsage: row.sourceUsage, sizeGroup: row.sizeGroup, parsedType: preview.detectedType, matchScore: row.matchScore, matchType: row.matchType, matchedFabricId: row.matchedFabricId, sourceCell: row.sourceCell } };
+  const reviewRequired = !definition?.components || (["MEDIUM", "LOW", "UNMATCHED"].includes(originalConfidence) && !explicitlyReviewed);
+  const importMatch = { ...(row.importMatch || {}), confidence: originalConfidence, score: row.importMatch?.score ?? row.matchScore ?? 0, rule: row.importMatch?.rule || row.matchType || originalConfidence, resolvedByUser: explicitlyReviewed };
+  return { rowId: `row_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, fabricId: reviewRequired && originalConfidence === "UNMATCHED" ? null : fabric?.id || null, fabricName: row.matchedFabricName || row.material, compositionId: reviewRequired ? null : definition?.id || null, composition: reviewRequired ? "" : definition?.label || "", compositionDefinition: reviewRequired ? null : clone(definition), yy: numericUsage(row.usage), confidence: row.confidence || originalConfidence, matchScore: row.matchScore ?? importMatch.score, importMatch, importStatus: { originalConfidence, matchScore: importMatch.score, reviewRequired, reviewed: !reviewRequired }, source: { sourceFileName: preview.file.name, sourceSheet: row.sourceSheet, sourceMaterialName: row.material, sourceUsage: row.sourceUsage, sizeGroup: row.sizeGroup, parsedType: preview.detectedType, matchScore: importMatch.score, matchType: row.matchType, matchedFabricId: row.matchedFabricId, sourceCell: row.sourceCell } };
 }
 function downloadFabricTemplate() {
   if (!window.ExcelJS) { showMessage("ExcelJS 라이브러리가 로드되지 않았습니다.", "error"); return; }

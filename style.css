@@ -279,6 +279,14 @@ select {
 .match-medium td { background: #fff9dc !important; }
 .match-low td { background: #fff0df !important; }
 .match-unmatched td { background: #fff0f0 !important; }
+/* Imported review state always wins over the confidence tint.  A row that was
+   UNMATCHED in Preview must remain visibly unresolved until the user confirms
+   a Fabric or Composition. */
+.review-required-row td,
+.review-required-row.match-high td,
+.review-required-row.match-medium td,
+.review-required-row.match-low td,
+.review-required-row.match-unmatched td { background: #fff0f0 !important; }
 .fabric-edit-input { min-width: 260px; }
 .composition-edit-input { min-width: 190px; }
 .not-in-db { color: var(--danger); font-size: 11px; font-weight: 700; }

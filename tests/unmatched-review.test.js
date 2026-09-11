@@ -13,6 +13,10 @@ const unresolved = context.convertPreviewRowToDraftRow(preview, parsedRow);
 
 if (unresolved.fabricId !== null || unresolved.compositionId !== null || unresolved.compositionDefinition !== null || unresolved.composition !== "") throw new Error("TEST A/E: UNMATCHED received an automatic composition");
 if (!unresolved.importStatus.reviewRequired || unresolved.yy !== 0.0163) throw new Error("TEST A: review status or YY missing");
+// Import must not re-run fuzzy matching merely because the Preview is read.
+// An unchanged empty Matched Fabric field preserves the parser's UNMATCHED result.
+const untouched = context.updatePreviewRowFromInputs({ ...parsedRow, importMatch: { confidence: "UNMATCHED", score: 0.2, rule: "UNMATCHED", resolvedByUser: false } }, "", "", "0.0163");
+if (untouched.confidence !== "UNMATCHED" || untouched.matchedFabricId !== null || untouched.compositionDefinition !== null) throw new Error("TEST B: Preview read re-matched an untouched UNMATCHED row");
 
 let calculation = context.calculateStyle({ name: preview.styleName, rows: [unresolved] });
 if (calculation.totalYy !== 0 || calculation.unresolvedYy !== 0.0163 || calculation.reviewCount !== 1) throw new Error("TEST A: unresolved row entered calculation");
