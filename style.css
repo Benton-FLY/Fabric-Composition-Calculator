@@ -280,7 +280,7 @@ select {
 .source-badge { display: block; max-width: 330px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11px; }
 .modal { position: fixed; z-index: 10; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(15, 23, 42, .42); }
 .modal.hidden { display: none; }
-.modal-card { width: min(1180px, 96vw); max-height: 88vh; overflow: auto; padding: 16px; border-radius: 10px; background: #fff; box-shadow: 0 20px 50px rgba(0,0,0,.25); }
+.modal-card { width: min(1250px, 96vw); max-height: 88vh; overflow: auto; padding: 16px; border-radius: 10px; background: #fff; box-shadow: 0 20px 50px rgba(0,0,0,.25); }
 .composition-builder { width: min(900px, 92vw); }
 .composition-builder .table-wrap { max-height: 360px; }
 .composition-builder .data-table { table-layout: fixed; }
@@ -295,24 +295,29 @@ select {
 .composition-builder .ratio-cell input { width: 100px; max-width: 110px; text-align: right; }
 .composition-builder .ratio-cell span { margin-left: 5px; }
 .composition-builder .action-cell { text-align: center; }
-.import-preview-table-wrapper { overflow-x: auto; max-height: 62vh; }
-.import-preview-table { min-width: 1150px; table-layout: fixed; }
+.import-preview-table-wrapper { width: 100%; overflow-x: auto; overflow-y: visible; max-height: 62vh; }
+.import-preview-table { width: 100%; min-width: 1180px; table-layout: fixed; border-collapse: collapse; }
 .import-preview-table col.source-material { width: 260px; }
 .import-preview-table col.matched-fabric { width: 240px; }
 .import-preview-table col.composition { width: 300px; }
-.import-preview-table col.parsed-yy { width: 110px; }
-.import-preview-table col.confidence { width: 120px; }
+.import-preview-table col.parsed-yy { width: 130px; }
+.import-preview-table col.confidence { width: 130px; }
 .import-preview-table col.rule { width: 180px; }
-.import-preview-table td { vertical-align: top; }
+.import-preview-table th,
+.import-preview-table td { box-sizing: border-box; vertical-align: middle; padding: 10px 8px; overflow: hidden; }
 .import-preview-table .source-material-cell { white-space: normal; word-break: break-word; line-height: 1.3; }
-.import-preview-table input { width: 100%; min-width: 0; }
-.import-preview-table .preview-composition-cell button { margin-top: 6px; }
-.import-preview-table .preview-yy-input { text-align: right; }
+.import-preview-table .matched-fabric-cell input,
+.import-preview-table .composition-cell input { display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+.import-preview-table .composition-cell button { margin-top: 6px; }
+.import-preview-table .parsed-yy-cell input { display: block; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; text-align: right; }
+.import-preview-table .confidence-cell { white-space: nowrap; text-align: center; }
+.import-preview-table .confidence-text { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-preview-table .rule-cell { white-space: normal; word-break: break-word; }
 .modal-card h2 { margin: 0; }
 .modal-actions { justify-content: flex-end; margin-top: 14px; }
 .preview-meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0; }
 .preview-meta div { padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: #f8fafc; }
-.preview-table input, .preview-table select { min-width: 180px; }
+.preview-table input, .preview-table select { min-width: 0; }
 .import-row-actions { display: flex; justify-content: flex-end; margin: 0 0 8px; }
 
 .fabric-section {
