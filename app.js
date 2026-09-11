@@ -408,8 +408,8 @@ function syncActiveDraft() {
   draft.dirty = true;
 }
 
-function activateDraft(id) {
-  syncActiveDraft();
+function activateDraft(id, { syncCurrent = true } = {}) {
+  if (syncCurrent) syncActiveDraft();
   const draft = styleDrafts[id];
   if (!draft) return;
   activeStyleId = id;
@@ -429,7 +429,7 @@ function renderStyleDraftList() {
 
 function workspaceSnapshot() { return clone({ styleDrafts, activeStyleId, selectedStyleIds: Array.from(selectedStyleIds) }); }
 function restoreWorkspace(snapshot) { styleDrafts = snapshot.styleDrafts || {}; activeStyleId = snapshot.activeStyleId; selectedStyleIds = new Set(snapshot.selectedStyleIds || []); if (!activeStyleId || !styleDrafts[activeStyleId]) activeStyleId = Object.keys(styleDrafts)[0] || null; if (!activeStyleId) newDraft(); const draft = activeDraft(); els.styleNameInput.value = draft.styleName; currentYyByFabricId = { ...draft.yyByFabricId }; renderStyleDraftList(); renderFabricTable(); }
-function commitWorkspaceChange(action) { undoStack.push(workspaceSnapshot()); redoStack = []; action(); renderStyleDraftList(); renderFabricTable(); updateHistoryButtons(); }
+function commitWorkspaceChange(action, { render = true } = {}) { undoStack.push(workspaceSnapshot()); redoStack = []; action(); if (render) { renderStyleDraftList(); renderFabricTable(); } updateHistoryButtons(); }
 function undoWorkspace() { if (!undoStack.length) return; redoStack.push(workspaceSnapshot()); restoreWorkspace(undoStack.pop()); updateHistoryButtons(); }
 function redoWorkspace() { if (!redoStack.length) return; undoStack.push(workspaceSnapshot()); restoreWorkspace(redoStack.pop()); updateHistoryButtons(); }
 function updateHistoryButtons() { if (els.undoBtn) els.undoBtn.disabled = !undoStack.length; if (els.redoBtn) els.redoBtn.disabled = !redoStack.length; }
@@ -1842,6 +1842,11 @@ function renderStyleUploadPreview() {
     <section class="preview-file" data-preview-file="${index}"><div class="preview-meta"><div><b>Style Name</b><input data-style-name value="${escapeAttribute(item.styleName)}"></div><div><b>Detected Type</b><select data-file-type><option ${item.detectedType === "PANT" ? "selected" : ""}>PANT</option><option ${item.detectedType === "JERSEY" ? "selected" : ""}>JERSEY</option><option ${item.detectedType === "GLOVE" ? "selected" : ""}>GLOVE</option><option ${item.detectedType === "UNKNOWN" ? "selected" : ""}>UNKNOWN</option></select></div><div><b>Source File</b><br>${escapeHtml(item.file.name)}</div></div>
     ${item.error ? `<p class="error-text">${escapeHtml(item.error)}</p>` : ""}<div class="table-wrap import-preview-table-wrapper"><table class="data-table preview-table import-preview-table"><colgroup><col class="source-material"><col class="matched-fabric"><col class="composition"><col class="parsed-yy"><col class="confidence"><col class="rule"></colgroup><thead><tr><th class="source-material-cell">Source Material</th><th class="matched-fabric-cell">Matched Fabric</th><th class="composition-cell">Composition</th><th class="parsed-yy-cell">Parsed YY</th><th class="confidence-cell">Confidence</th><th class="rule-cell">Rule</th></tr></thead><tbody>${item.rows.map((row, rowIndex) => `<tr class="match-${row.confidence.toLowerCase()}"><td class="source-material-cell">${escapeHtml(row.material)}</td><td class="matched-fabric-cell"><input list="fabricAutocomplete" data-row-fabric="${rowIndex}" value="${escapeAttribute(row.matchedFabricName)}" title="Source: ${escapeAttribute(row.material)}&#10;Matched: ${escapeAttribute(row.matchedFabricName)}&#10;Confidence: ${Math.round(row.matchScore * 100)}%"></td><td class="composition-cell"><input list="compositionAutocomplete" placeholder="Composition 선택 또는 생성" data-row-composition="${rowIndex}" value="${escapeAttribute(row.compositionDefinition?.label || row.composition)}"><button type="button" class="mini-button" data-preview-compose="${rowIndex}">${row.compositionDefinition?.source === "temporary" ? "CUSTOM" : "Composition 만들기"}</button></td><td class="parsed-yy-cell"><input class="preview-yy-input" type="number" min="0" step="0.0001" data-row-usage="${rowIndex}" value="${formatYY(row.usage)}"></td><td class="confidence-cell"><span class="confidence-text">${escapeHtml(row.confidence)} ${Math.round(row.matchScore * 100)}%</span></td><td class="rule-cell">${escapeHtml(row.rule)}</td></tr>`).join("")}</tbody></table></div></section>`).join(""));
   els.uploadPreviewBody.querySelectorAll("[data-preview-file]").forEach((section) => section.querySelectorAll("[data-preview-compose]").forEach((button) => button.addEventListener("click", () => { const fileIndex = Number(section.dataset.previewFile); const rowIndex = Number(button.dataset.previewCompose); const row = pendingUpload.files[fileIndex].rows[rowIndex]; openCompositionBuilder({ kind: "preview", fileIndex, rowIndex }, row.compositionDefinition || { label: row.composition, components: {} }); })));
+  els.uploadPreviewBody.querySelectorAll("[data-preview-file]").forEach((section) => {
+    const preview = pendingUpload.files[Number(section.dataset.previewFile)];
+    section.querySelector("[data-style-name]").addEventListener("input", (event) => { preview.styleName = event.target.value; });
+    section.querySelector("[data-file-type]").addEventListener("change", (event) => { preview.detectedType = event.target.value; });
+  });
   els.importUploadPreviewBtn.textContent = files.length > 1 ? "Import All" : "Import";
 }
 function readPreviewEdits() {
@@ -1850,17 +1855,24 @@ function readPreviewEdits() {
 function commitUploadPreview() {
   if (!pendingUpload) return; readPreviewEdits();
   if (pendingUpload.kind === "fabric") { commitFabricImport(); return; }
+  const previews = pendingUpload.files;
+  if (previews.some((preview) => !normalizeStyleName(preview.styleName))) { showMessage("Style Name is required.", "error"); return; }
   const importedCount = pendingUpload.files.length;
   // Preview state is the sole import source. Do not read or clone the background draft.
   commitWorkspaceChange(() => {
     pendingUpload.files.forEach((preview) => createDraftFromImport(preview));
-  });
-  closeUploadPreview(); activateDraft(activeStyleId); showMessage(`${importedCount}개 Style draft를 생성했습니다.`);
+  }, { render: false });
+  const importedDraftId = activeStyleId;
+  closeUploadPreview();
+  // activeStyleId already points at the imported draft. The editor still contains
+  // the background style name, so it must not be synchronized into the new draft.
+  activateDraft(importedDraftId, { syncCurrent: false });
+  showMessage(`${importedCount}개 Style draft를 생성했습니다.`);
 }
 function createDraftFromImport(preview) {
   const rows = preview.rows.map((row) => { const dbComposition = row.matchedFabricId ? getComposition(appState.fabrics.find((fabric) => fabric.id === row.matchedFabricId)?.compositionId) : appState.compositions.find((composition) => normalizeText(composition.label) === normalizeText(row.composition)); const definition = row.compositionDefinition || dbComposition || null; return { rowId: `row_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, fabricId: row.matchedFabricId || null, fabricName: row.matchedFabricName || row.material, compositionId: definition?.id || null, composition: definition?.label || row.composition || "", compositionDefinition: definition ? clone(definition) : null, yy: numericUsage(row.usage), confidence: row.confidence, matchScore: row.matchScore, source: { sourceFileName: preview.file.name, sourceSheet: row.sourceSheet, sourceMaterialName: row.material, sourceUsage: row.sourceUsage, sizeGroup: row.sizeGroup, parsedType: preview.detectedType, matchScore: row.matchScore, matchType: row.matchType, matchedFabricId: row.matchedFabricId, sourceCell: row.sourceCell } }; });
   const yyByFabricId = {}; rows.forEach((row) => { if (row.fabricId && row.yy > 0) yyByFabricId[row.fabricId] = (yyByFabricId[row.fabricId] || 0) + row.yy; });
-  return newDraft({ name: preview.styleName, yyByFabricId }, { rows, sourceType: "import", sourceFile: preview.file.name, parsedType: preview.detectedType, dirty: true });
+  return newDraft({ name: normalizeStyleName(preview.styleName) || "Untitled Style", yyByFabricId }, { rows, sourceType: "import", sourceFile: preview.file.name, parsedType: preview.detectedType, dirty: true });
 }
 function downloadFabricTemplate() {
   if (!window.ExcelJS) { showMessage("ExcelJS 라이브러리가 로드되지 않았습니다.", "error"); return; }
