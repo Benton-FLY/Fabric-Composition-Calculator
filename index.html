@@ -33,6 +33,7 @@
             <button type="button" id="sidebarNewStyleBtn" class="primary">+ New Style</button>
             <label class="file-button upload-button" for="consumptionUploadInput">소요량표 업로드</label>
             <input id="consumptionUploadInput" class="sr-only" type="file" accept=".xlsx,.xls" multiple>
+            <div class="draft-bulk-actions"><button type="button" id="selectAllDraftsBtn">전체 선택</button><button type="button" id="deleteSelectedDraftsBtn" class="danger">선택 삭제</button></div>
             <div id="styleDraftList" class="draft-list"></div>
           </aside>
           <div class="style-editor">
@@ -46,6 +47,8 @@
             <input id="fabricSearchInput" type="search" placeholder="원단명 또는 Composition 검색">
           </div>
           <div class="toolbar-actions">
+            <button type="button" id="undoBtn" title="Ctrl/Cmd+Z">↶ Undo</button>
+            <button type="button" id="redoBtn" title="Ctrl/Cmd+Shift+Z">↷ Redo</button>
             <button type="button" id="newStyleBtn">신규 스타일</button>
             <button type="button" id="clearYyBtn">YY 지우기</button>
             <button type="button" id="saveStyleBtn" class="primary">저장</button>
@@ -55,6 +58,7 @@
 
         <div class="content-grid">
           <section class="fabric-section">
+            <div class="import-row-actions"><button type="button" id="addDraftFabricRowBtn">+ 원단 추가</button></div>
             <div class="table-wrap">
               <table id="fabricTable" class="data-table">
                 <thead id="fabricTableHead"></thead>

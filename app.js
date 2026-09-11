@@ -120,6 +120,10 @@ let currentYyByFabricId = {};
 let styleDrafts = {};
 let activeStyleId = null;
 let pendingUpload = null;
+let selectedStyleIds = new Set();
+let undoStack = [];
+let redoStack = [];
+let inputHistoryBefore = null;
 let lastExtractedStyles = [];
 let dbEditMode = false;
 let dbEditSnapshot = null;
@@ -147,7 +151,8 @@ function bindElements() {
     "singleLineToggle", "includeWarningsToggle", "resetCareMappingBtn", "careMappingTableBody",
     "currentCareLabelArea", "sidebarNewStyleBtn", "consumptionUploadInput", "styleDraftList",
     "fabricTemplateBtn", "fabricExcelUploadInput", "uploadPreviewModal", "uploadPreviewTitle", "uploadPreviewBody",
-    "closeUploadPreviewBtn", "cancelUploadPreviewBtn", "importUploadPreviewBtn",
+    "closeUploadPreviewBtn", "cancelUploadPreviewBtn", "importUploadPreviewBtn", "undoBtn", "redoBtn",
+    "selectAllDraftsBtn", "deleteSelectedDraftsBtn", "addDraftFabricRowBtn",
   ].forEach((id) => { els[id] = document.getElementById(id); });
 }
 
@@ -160,6 +165,11 @@ function bindEvents() {
   });
   els.newStyleBtn.addEventListener("click", newStyle);
   els.sidebarNewStyleBtn.addEventListener("click", newStyle);
+  els.selectAllDraftsBtn.addEventListener("click", toggleSelectAllDrafts);
+  els.deleteSelectedDraftsBtn.addEventListener("click", deleteSelectedDrafts);
+  els.addDraftFabricRowBtn.addEventListener("click", addDraftFabricRow);
+  els.undoBtn.addEventListener("click", undoWorkspace);
+  els.redoBtn.addEventListener("click", redoWorkspace);
   els.consumptionUploadInput.addEventListener("change", handleConsumptionFiles);
   els.saveStyleBtn.addEventListener("click", saveCurrentStyle);
   els.fabricSearchInput.addEventListener("input", renderFabricTable);
@@ -178,6 +188,8 @@ function bindEvents() {
   els.downloadCsvBtn.addEventListener("click", () => downloadCsv());
   els.downloadXlsxBtn.addEventListener("click", () => downloadXlsx());
   els.styleNameInput.addEventListener("input", () => { syncActiveDraft(); updateSummary(); renderStyleDraftList(); });
+  els.styleNameInput.addEventListener("focus", () => { inputHistoryBefore = workspaceSnapshot(); });
+  els.styleNameInput.addEventListener("blur", () => finalizeInputHistory());
   els.dbEditBtn.addEventListener("click", enterDbEditMode);
   els.dbSaveLockBtn.addEventListener("click", saveDbAndLock);
   els.dbCancelBtn.addEventListener("click", cancelDbEdits);
@@ -199,6 +211,7 @@ function bindEvents() {
   ].filter(Boolean).forEach((input) => input.addEventListener("change", handleCareLabelOptionChange));
   els.resetCareMappingBtn.addEventListener("click", resetCareLabelMappings);
   els.resultArea.addEventListener("click", handleResultAreaClick);
+  document.addEventListener("keydown", handleWorkspaceShortcuts);
 }
 
 function loadStore() {
@@ -368,7 +381,7 @@ function parseYy(value) {
 
 function newDraft(style = { name: "", yyByFabricId: {} }, extras = {}) {
   const id = `draft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  styleDrafts[id] = { id, styleName: normalizeStyleName(style.name), yyByFabricId: { ...(style.yyByFabricId || {}) }, rows: extras.rows || [], sourceFile: extras.sourceFile || "", dirty: Boolean(extras.dirty), ...extras };
+  styleDrafts[id] = { id, styleName: normalizeStyleName(style.name), yyByFabricId: { ...(style.yyByFabricId || {}) }, rows: extras.rows || [], sourceFile: extras.sourceFile || "", sourceType: extras.sourceType || "manual", dirty: Boolean(extras.dirty), ...extras };
   activeStyleId = id;
   return styleDrafts[id];
 }
@@ -395,9 +408,22 @@ function activateDraft(id) {
 
 function renderStyleDraftList() {
   if (!els.styleDraftList) return;
-  els.styleDraftList.innerHTML = Object.values(styleDrafts).map((draft) => `<button type="button" class="draft-item ${draft.id === activeStyleId ? "active" : ""}" data-draft-id="${escapeAttribute(draft.id)}" title="${escapeAttribute(draft.sourceFile || draft.styleName)}">${escapeHtml(draft.styleName || "Untitled Style")} ${draft.dirty ? '<span class="draft-dirty">●</span>' : ""}</button>`).join("");
-  els.styleDraftList.querySelectorAll("[data-draft-id]").forEach((button) => button.addEventListener("click", () => activateDraft(button.dataset.draftId)));
+  els.styleDraftList.innerHTML = Object.values(styleDrafts).map((draft) => `<div class="draft-item ${draft.id === activeStyleId ? "active" : ""}" data-draft-id="${escapeAttribute(draft.id)}"><input type="checkbox" data-draft-select="${escapeAttribute(draft.id)}" ${selectedStyleIds.has(draft.id) ? "checked" : ""}><button type="button" class="draft-label" data-draft-open="${escapeAttribute(draft.id)}" title="${escapeAttribute(draft.sourceFile || draft.styleName)}">${escapeHtml(draft.styleName || "Untitled Style")}<span class="draft-source">${draft.sourceType === "import" ? "Imported" : "Manual"}</span></button><button type="button" class="draft-delete" data-draft-delete="${escapeAttribute(draft.id)}" aria-label="삭제">×</button></div>`).join("");
+  els.styleDraftList.querySelectorAll("[data-draft-open]").forEach((button) => button.addEventListener("click", () => activateDraft(button.dataset.draftOpen)));
+  els.styleDraftList.querySelectorAll("[data-draft-select]").forEach((input) => input.addEventListener("click", (event) => { event.stopPropagation(); if (input.checked) selectedStyleIds.add(input.dataset.draftSelect); else selectedStyleIds.delete(input.dataset.draftSelect); renderStyleDraftList(); }));
+  els.styleDraftList.querySelectorAll("[data-draft-delete]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); deleteDrafts([button.dataset.draftDelete]); }));
 }
+
+function workspaceSnapshot() { return clone({ styleDrafts, activeStyleId, selectedStyleIds: Array.from(selectedStyleIds) }); }
+function restoreWorkspace(snapshot) { styleDrafts = snapshot.styleDrafts || {}; activeStyleId = snapshot.activeStyleId; selectedStyleIds = new Set(snapshot.selectedStyleIds || []); if (!activeStyleId || !styleDrafts[activeStyleId]) activeStyleId = Object.keys(styleDrafts)[0] || null; if (!activeStyleId) newDraft(); const draft = activeDraft(); els.styleNameInput.value = draft.styleName; currentYyByFabricId = { ...draft.yyByFabricId }; renderStyleDraftList(); renderFabricTable(); }
+function commitWorkspaceChange(action) { undoStack.push(workspaceSnapshot()); redoStack = []; action(); renderStyleDraftList(); renderFabricTable(); updateHistoryButtons(); }
+function undoWorkspace() { if (!undoStack.length) return; redoStack.push(workspaceSnapshot()); restoreWorkspace(undoStack.pop()); updateHistoryButtons(); }
+function redoWorkspace() { if (!redoStack.length) return; undoStack.push(workspaceSnapshot()); restoreWorkspace(redoStack.pop()); updateHistoryButtons(); }
+function updateHistoryButtons() { if (els.undoBtn) els.undoBtn.disabled = !undoStack.length; if (els.redoBtn) els.redoBtn.disabled = !redoStack.length; }
+function handleWorkspaceShortcuts(event) { if (!(event.ctrlKey || event.metaKey)) return; const key = event.key.toLowerCase(); if (key === "z") { event.preventDefault(); event.shiftKey ? redoWorkspace() : undoWorkspace(); } else if (key === "y" && !event.metaKey) { event.preventDefault(); redoWorkspace(); } }
+function toggleSelectAllDrafts() { const ids = Object.keys(styleDrafts); selectedStyleIds = selectedStyleIds.size === ids.length ? new Set() : new Set(ids); renderStyleDraftList(); }
+function deleteSelectedDrafts() { deleteDrafts(Array.from(selectedStyleIds)); }
+function deleteDrafts(ids) { const targets = ids.filter((id) => styleDrafts[id]); if (!targets.length) return; const names = targets.map((id) => styleDrafts[id].styleName || "Untitled Style"); const message = targets.length === 1 ? `${names[0]} 스타일을 삭제하시겠습니까?\n입력한 데이터도 함께 삭제됩니다.` : `선택한 ${targets.length}개 스타일을 삭제하시겠습니까?\n삭제 후 복구하려면 Undo를 사용해야 합니다.`; if (!confirm(message)) return; commitWorkspaceChange(() => { targets.forEach((id) => delete styleDrafts[id]); selectedStyleIds = new Set(); if (!styleDrafts[activeStyleId]) activeStyleId = Object.keys(styleDrafts)[0] || null; if (!activeStyleId) newDraft(); const draft = activeDraft(); els.styleNameInput.value = draft.styleName; currentYyByFabricId = { ...draft.yyByFabricId }; }); }
 
 function calculateStyle(style) {
   const materials = getMaterials();
@@ -611,9 +637,15 @@ function renderFabricTable() {
     <tr>
       <th>No</th><th>Fabric Name</th><th>Composition</th><th>YY</th><th>Ratio</th>
       ${materials.map((material) => `<th>${escapeHtml(material.name)}</th>`).join("")}
+      ${activeDraft()?.sourceType === "import" ? "<th>Action</th>" : ""}
     </tr>
   `;
   els.fabricTableBody.innerHTML = "";
+  if (activeDraft()?.sourceType === "import") {
+    renderImportedFabricTable(materials);
+    refreshFabricCalculations();
+    return;
+  }
 
   appState.fabrics
     .slice()
@@ -662,6 +694,34 @@ function renderFabricTable() {
 
   refreshFabricCalculations();
 }
+
+function renderImportedFabricTable(materials) {
+  const draft = activeDraft();
+  (draft.rows || []).forEach((row, index) => {
+    const tr = document.createElement("tr"); tr.className = `match-${(row.confidence || "UNMATCHED").toLowerCase()}`;
+    const isDbFabric = Boolean(row.fabricId);
+    tr.innerHTML = `<td>${index + 1}</td><td><input class="fabric-edit-input" list="fabricAutocomplete" data-import-row-fabric="${escapeAttribute(row.rowId)}" value="${escapeAttribute(row.fabricName || "")}" title="Source: ${escapeAttribute(row.source?.sourceMaterialName || "")}\nMatched: ${escapeAttribute(row.fabricName || "")}\nConfidence: ${Math.round((row.matchScore || 0) * 100)}%">${row.source?.sourceMaterialName ? `<span class="source-badge">Source: ${escapeHtml(row.source.sourceMaterialName)} · ${escapeHtml(row.source.sourceSheet || "")}</span>` : ""}${!isDbFabric && row.fabricName ? '<span class="not-in-db">Not in Fabric DB</span>' : ""}</td><td><input class="composition-edit-input" list="compositionAutocomplete" data-import-row-composition="${escapeAttribute(row.rowId)}" value="${escapeAttribute(row.composition || "")}"></td><td class="number-cell"><input class="yy-input" type="number" min="0" step="0.0001" data-import-row-yy="${escapeAttribute(row.rowId)}" value="${row.yy || ""}"></td><td class="number-cell">${escapeHtml(row.confidence || "")}</td>${materials.map(() => "<td class=\"number-cell\">—</td>").join("")}<td><button type="button" class="mini-button danger" data-import-row-delete="${escapeAttribute(row.rowId)}">X</button></td>`;
+    tr.querySelectorAll("input").forEach((input) => { input.addEventListener("focus", () => { inputHistoryBefore = workspaceSnapshot(); }); input.addEventListener("blur", finalizeInputHistory); });
+    tr.querySelector("[data-import-row-fabric]").addEventListener("change", updateImportDraftRow);
+    tr.querySelector("[data-import-row-composition]").addEventListener("change", updateImportDraftRow);
+    tr.querySelector("[data-import-row-yy]").addEventListener("input", updateImportDraftRow);
+    tr.querySelector("[data-import-row-delete]").addEventListener("click", () => deleteImportDraftRow(row.rowId));
+    els.fabricTableBody.append(tr);
+  });
+}
+function finalizeInputHistory() { if (!inputHistoryBefore) return; const before = JSON.stringify(inputHistoryBefore); const after = JSON.stringify(workspaceSnapshot()); if (before !== after) { undoStack.push(inputHistoryBefore); redoStack = []; updateHistoryButtons(); } inputHistoryBefore = null; }
+function updateImportDraftRow(event) {
+  const rowId = event.target.dataset.importRowFabric || event.target.dataset.importRowComposition || event.target.dataset.importRowYy; const row = activeDraft()?.rows.find((item) => item.rowId === rowId); if (!row) return;
+  const tr = event.target.closest("tr"); const fabricValue = tr.querySelector("[data-import-row-fabric]").value.trim(); const compositionValue = tr.querySelector("[data-import-row-composition]").value.trim(); const yy = numericUsage(tr.querySelector("[data-import-row-yy]").value);
+  const fabric = appState.fabrics.find((item) => fabricMatchingKey(item.name) === fabricMatchingKey(fabricValue));
+  row.fabricId = fabric?.id || null; row.fabricName = fabric?.name || fabricValue; row.compositionId = fabric?.compositionId || appState.compositions.find((item) => normalizeText(item.label) === normalizeText(compositionValue))?.id || null; row.composition = fabric ? getCompositionLabel(fabric.compositionId) : compositionValue; row.yy = yy;
+  rebuildDraftYy(activeDraft());
+  if (event.target.dataset.importRowYy) { refreshFabricCalculations(); return; }
+  renderFabricTable();
+}
+function rebuildDraftYy(draft) { draft.yyByFabricId = {}; (draft.rows || []).forEach((row) => { if (row.fabricId && parseYy(row.yy) > 0) draft.yyByFabricId[row.fabricId] = (draft.yyByFabricId[row.fabricId] || 0) + parseYy(row.yy); }); currentYyByFabricId = { ...draft.yyByFabricId }; draft.dirty = true; }
+function addDraftFabricRow() { const draft = activeDraft(); if (!draft || draft.sourceType !== "import") return; commitWorkspaceChange(() => { draft.rows.push({ rowId: `row_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, fabricId: null, fabricName: "", compositionId: null, composition: "", yy: "", confidence: "", source: {} }); }); }
+function deleteImportDraftRow(rowId) { commitWorkspaceChange(() => { const draft = activeDraft(); draft.rows = draft.rows.filter((row) => row.rowId !== rowId); rebuildDraftYy(draft); }); }
 
 function handleYyInput(event) {
   const fabricId = event.target.dataset.fabricId;
@@ -1651,21 +1711,26 @@ function parsePant(matrix, sheetName) {
     records.push(makeRecord(material, usage, currentSize, sheetName, r, usageCol, "PANT"));
   }); return records;
 }
+function isNetFabricUsageHeader(text) { const n = normalizeText(text); return (n.includes("원단 소요량") || n.includes("소요량")) && !/(LOSS|로스|포함)/.test(n); }
+function resolveJerseySection(row, matrix, headerRowIndex, sheetName) {
+  const materialColumnIndex = headerColumn(row, (v) => v === "원단명");
+  const usageCandidates = row.map((cell, index) => ({ cell, index, n: normalizeText(cell) })).filter(({ cell }) => isNetFabricUsageHeader(cell));
+  usageCandidates.sort((a, b) => { const rank = (x) => x.n === "원단 소요량 (YD)" ? 0 : x.n === "원단 소요량" ? 1 : x.n.includes("원단 소요량") ? 2 : 3; return rank(a) - rank(b) || a.index - b.index; });
+  return { materialColumnIndex, netUsageColumnIndex: usageCandidates[0]?.index ?? -1, lossColumnIndex: headerColumn(row, (v) => /(LOSS|로스)/.test(v) && !v.includes("포함")), lossIncludedColumnIndex: headerColumn(row, (v) => /(LOSS|로스|포함)/.test(v) && v.includes("소요량")), sizeGroup: `${sheetName}:${sizeAt(matrix, headerRowIndex)}`, headerRowIndex };
+}
 function parseJersey(matrix, sheetName) {
-  const records = []; let materialCol = -1; let usageCol = -1; let section = "";
-  matrix.forEach((row, r) => {
+  const records = []; let section = null;
+  matrix.forEach((row, rowIndex) => {
     const text = row.map(normalizeText).join("|");
-    if (text.includes("부자재")) { materialCol = -1; usageCol = -1; return; }
-    if (text.includes("원단명")) {
-      materialCol = headerColumn(row, (v) => v === "원단명");
-      usageCol = headerColumn(row, (v) => (v.includes("원단 소요량") || v.startsWith("소요량")) && !v.includes("LOSS"));
-      section = `${sheetName}:${sizeAt(matrix, r)}`; return;
-    }
-    if (materialCol < 0 || usageCol < 0) return;
-    const material = String(row[materialCol] || "").trim(); const usage = numericUsage(row[usageCol]);
+    if (text.includes("부자재")) { section = null; return; }
+    if (text.includes("원단명")) { section = resolveJerseySection(row, matrix, rowIndex, sheetName); return; }
+    if (!section || section.materialColumnIndex < 0 || section.netUsageColumnIndex < 0) return;
+    const material = String(row[section.materialColumnIndex] || "").trim();
+    // The resolved header index is the only permitted source for YY.
+    const usage = numericUsage(row[section.netUsageColumnIndex]);
     if (!material || !usage) return;
     const match = matchFabric(material); if (!match.fabric && isAccessory(material)) return;
-    records.push(makeRecord(material, usage, section, sheetName, r, usageCol, "JERSEY"));
+    records.push({ ...makeRecord(material, usage, section.sizeGroup, sheetName, rowIndex, section.netUsageColumnIndex, "JERSEY"), header: section });
   }); return records;
 }
 function parseGlove(matrix, sheetName) {
@@ -1691,7 +1756,8 @@ function aggregateUsage(records) {
 }
 function parseConsumptionWorkbook(file, workbook) {
   const parsed = [];
-  workbook.SheetNames.forEach((sheetName) => { const matrix = sheetMatrix(workbook.Sheets[sheetName]); const type = typeFromMatrix(matrix, file.name); if (type === "PANT") parsed.push(...parsePant(matrix, sheetName)); else if (type === "JERSEY") parsed.push(...parseJersey(matrix, sheetName)); else if (type === "GLOVE" && (!/L\d/i.test(file.name) || sheetName.toUpperCase().includes((file.name.match(/L\d/i) || [""])[0].toUpperCase()))) parsed.push(...parseGlove(matrix, sheetName)); });
+  const hasDigitalJerseySheet = workbook.SheetNames.some((name) => /디지|DIGI/i.test(name));
+  workbook.SheetNames.forEach((sheetName) => { const matrix = sheetMatrix(workbook.Sheets[sheetName]); const type = typeFromMatrix(matrix, file.name); if (type === "PANT") parsed.push(...parsePant(matrix, sheetName)); else if (type === "JERSEY" && (!hasDigitalJerseySheet || /디지|DIGI/i.test(sheetName))) parsed.push(...parseJersey(matrix, sheetName)); else if (type === "GLOVE" && (!/L\d/i.test(file.name) || sheetName.toUpperCase().includes((file.name.match(/L\d/i) || [""])[0].toUpperCase()))) parsed.push(...parseGlove(matrix, sheetName)); });
   const detectedType = parsed[0]?.parsedType || "UNKNOWN"; return { file, styleName: styleNameFromWorkbook(workbook, file.name), detectedType, rows: aggregateUsage(parsed), error: parsed.length ? "" : detectedType === "UNKNOWN" ? "Unknown file format" : "No numeric usage found" };
 }
 async function readWorkbook(file) { if (!window.XLSX) throw new Error("SheetJS library not loaded"); return XLSX.read(await file.arrayBuffer(), { type: "array", cellFormula: false, cellText: true }); }
@@ -1740,8 +1806,16 @@ function commitUploadPreview() {
   if (!pendingUpload) return; readPreviewEdits();
   if (pendingUpload.kind === "fabric") { commitFabricImport(); return; }
   const importedCount = pendingUpload.files.length;
-  pendingUpload.files.forEach((fileResult) => { const yyByFabricId = {}; fileResult.rows.forEach((row) => { if (row.matchedFabricId && row.usage > 0) yyByFabricId[row.matchedFabricId] = (yyByFabricId[row.matchedFabricId] || 0) + row.usage; }); newDraft({ name: fileResult.styleName, yyByFabricId }, { rows: fileResult.rows, sourceFile: fileResult.file.name, parsedType: fileResult.detectedType, dirty: true }); });
+  // Preview state is the sole import source. Do not read or clone the background draft.
+  commitWorkspaceChange(() => {
+    pendingUpload.files.forEach((preview) => createDraftFromImport(preview));
+  });
   closeUploadPreview(); activateDraft(activeStyleId); showMessage(`${importedCount}개 Style draft를 생성했습니다.`);
+}
+function createDraftFromImport(preview) {
+  const rows = preview.rows.map((row) => ({ rowId: `row_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, fabricId: row.matchedFabricId || null, fabricName: row.matchedFabricName || row.material, compositionId: row.matchedFabricId ? appState.fabrics.find((fabric) => fabric.id === row.matchedFabricId)?.compositionId || null : appState.compositions.find((composition) => normalizeText(composition.label) === normalizeText(row.composition))?.id || null, composition: row.composition || "", yy: numericUsage(row.usage), confidence: row.confidence, matchScore: row.matchScore, source: { sourceFileName: preview.file.name, sourceSheet: row.sourceSheet, sourceMaterialName: row.material, sourceUsage: row.sourceUsage, sizeGroup: row.sizeGroup, parsedType: preview.detectedType, matchScore: row.matchScore, matchType: row.matchType, matchedFabricId: row.matchedFabricId, sourceCell: row.sourceCell } }));
+  const yyByFabricId = {}; rows.forEach((row) => { if (row.fabricId && row.yy > 0) yyByFabricId[row.fabricId] = (yyByFabricId[row.fabricId] || 0) + row.yy; });
+  return newDraft({ name: preview.styleName, yyByFabricId }, { rows, sourceType: "import", sourceFile: preview.file.name, parsedType: preview.detectedType, dirty: true });
 }
 function downloadFabricTemplate() {
   if (!window.ExcelJS) { showMessage("ExcelJS 라이브러리가 로드되지 않았습니다.", "error"); return; }
