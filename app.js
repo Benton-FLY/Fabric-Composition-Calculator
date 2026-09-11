@@ -1,5 +1,5 @@
 const STORAGE_KEY = "fabricCompositionCalculator";
-const STORAGE_VERSION = 3;
+const STORAGE_VERSION = 4;
 const MIGRATION_BACKUP_KEY = "fabricCompositionBackupBeforeV2Migration";
 const CARE_LABEL_MODES = ["internal", "us", "eu"];
 const CARE_LABEL_TYPES = ["fiber", "custom-warning", "animal-nontextile"];
@@ -117,6 +117,9 @@ const SAMPLE_STYLE = {
 let appState;
 appState = loadStore();
 let currentYyByFabricId = {};
+let styleDrafts = {};
+let activeStyleId = null;
+let pendingUpload = null;
 let lastExtractedStyles = [];
 let dbEditMode = false;
 let dbEditSnapshot = null;
@@ -142,7 +145,9 @@ function bindElements() {
     "fabricSortSelect", "addFabricBtn", "fabricDbTableBody", "carePreviewToggle",
     "usStrictFtcToggle", "includeInternalToggle", "includeUsToggle", "includeEuToggle",
     "singleLineToggle", "includeWarningsToggle", "resetCareMappingBtn", "careMappingTableBody",
-    "currentCareLabelArea",
+    "currentCareLabelArea", "sidebarNewStyleBtn", "consumptionUploadInput", "styleDraftList",
+    "fabricTemplateBtn", "fabricExcelUploadInput", "uploadPreviewModal", "uploadPreviewTitle", "uploadPreviewBody",
+    "closeUploadPreviewBtn", "cancelUploadPreviewBtn", "importUploadPreviewBtn",
   ].forEach((id) => { els[id] = document.getElementById(id); });
 }
 
@@ -154,6 +159,8 @@ function bindEvents() {
     button.addEventListener("click", () => activateDbTab(button.dataset.dbTab));
   });
   els.newStyleBtn.addEventListener("click", newStyle);
+  els.sidebarNewStyleBtn.addEventListener("click", newStyle);
+  els.consumptionUploadInput.addEventListener("change", handleConsumptionFiles);
   els.saveStyleBtn.addEventListener("click", saveCurrentStyle);
   els.fabricSearchInput.addEventListener("input", renderFabricTable);
   els.clearYyBtn.addEventListener("click", clearYy);
@@ -170,13 +177,18 @@ function bindEvents() {
   els.printBtn.addEventListener("click", () => window.print());
   els.downloadCsvBtn.addEventListener("click", () => downloadCsv());
   els.downloadXlsxBtn.addEventListener("click", () => downloadXlsx());
-  els.styleNameInput.addEventListener("input", updateSummary);
+  els.styleNameInput.addEventListener("input", () => { syncActiveDraft(); updateSummary(); renderStyleDraftList(); });
   els.dbEditBtn.addEventListener("click", enterDbEditMode);
   els.dbSaveLockBtn.addEventListener("click", saveDbAndLock);
   els.dbCancelBtn.addEventListener("click", cancelDbEdits);
   els.addMaterialBtn.addEventListener("click", addMaterial);
   els.addCompositionBtn.addEventListener("click", addComposition);
   els.addFabricBtn.addEventListener("click", addFabric);
+  els.fabricTemplateBtn.addEventListener("click", downloadFabricTemplate);
+  els.fabricExcelUploadInput.addEventListener("change", handleFabricExcelUpload);
+  els.closeUploadPreviewBtn.addEventListener("click", closeUploadPreview);
+  els.cancelUploadPreviewBtn.addEventListener("click", closeUploadPreview);
+  els.importUploadPreviewBtn.addEventListener("click", commitUploadPreview);
   els.materialSearchInput.addEventListener("input", renderMaterialDb);
   els.compositionSearchInput.addEventListener("input", renderCompositionDb);
   els.fabricDbSearchInput.addEventListener("input", renderFabricDb);
@@ -200,7 +212,7 @@ function loadStore() {
     const parsed = JSON.parse(raw);
     if (!parsed || parsed.version !== STORAGE_VERSION) {
       localStorage.setItem(MIGRATION_BACKUP_KEY, raw);
-      const migrated = migrateToV3(parsed);
+      const migrated = migrateToV4(parsed);
       saveStore(migrated);
       return migrated;
     }
@@ -274,6 +286,13 @@ function migrateToV3(data) {
   return store;
 }
 
+function migrateToV4(data) {
+  const store = data?.version === 3 ? data : migrateToV3(data);
+  normalizeV3Store(store);
+  store.version = STORAGE_VERSION;
+  return store;
+}
+
 function normalizeV3Store(store) {
   store.materials = Array.isArray(store.materials) ? store.materials : clone(DEFAULT_MATERIALS);
   store.compositions = Array.isArray(store.compositions) ? store.compositions : clone(DEFAULT_COMPOSITIONS);
@@ -299,6 +318,8 @@ function renderAll() {
   renderSavedStyles();
   renderDbManagement();
   renderUnmappedFabrics();
+  renderAutocompleteLists();
+  renderStyleDraftList();
 }
 
 function getMaterials() {
@@ -343,6 +364,39 @@ function parseYy(value) {
   if (value === null || value === undefined || value === "") return 0;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function newDraft(style = { name: "", yyByFabricId: {} }, extras = {}) {
+  const id = `draft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  styleDrafts[id] = { id, styleName: normalizeStyleName(style.name), yyByFabricId: { ...(style.yyByFabricId || {}) }, rows: extras.rows || [], sourceFile: extras.sourceFile || "", dirty: Boolean(extras.dirty), ...extras };
+  activeStyleId = id;
+  return styleDrafts[id];
+}
+
+function activeDraft() { return styleDrafts[activeStyleId]; }
+function syncActiveDraft() {
+  const draft = activeDraft();
+  if (!draft || !els.styleNameInput) return;
+  draft.styleName = normalizeStyleName(els.styleNameInput.value);
+  draft.yyByFabricId = { ...currentYyByFabricId };
+  draft.dirty = true;
+}
+
+function activateDraft(id) {
+  syncActiveDraft();
+  const draft = styleDrafts[id];
+  if (!draft) return;
+  activeStyleId = id;
+  els.styleNameInput.value = draft.styleName;
+  currentYyByFabricId = { ...draft.yyByFabricId };
+  renderStyleDraftList();
+  renderFabricTable();
+}
+
+function renderStyleDraftList() {
+  if (!els.styleDraftList) return;
+  els.styleDraftList.innerHTML = Object.values(styleDrafts).map((draft) => `<button type="button" class="draft-item ${draft.id === activeStyleId ? "active" : ""}" data-draft-id="${escapeAttribute(draft.id)}" title="${escapeAttribute(draft.sourceFile || draft.styleName)}">${escapeHtml(draft.styleName || "Untitled Style")} ${draft.dirty ? '<span class="draft-dirty">●</span>' : ""}</button>`).join("");
+  els.styleDraftList.querySelectorAll("[data-draft-id]").forEach((button) => button.addEventListener("click", () => activateDraft(button.dataset.draftId)));
 }
 
 function calculateStyle(style) {
@@ -573,8 +627,8 @@ function renderFabricTable() {
       tr.dataset.fabricId = fabric.id;
       tr.innerHTML = `
         <td>${index + 1}</td>
-        <td>${escapeHtml(fabric.name)}</td>
-        <td>${escapeHtml(getCompositionLabel(fabric.compositionId))}</td>
+        <td><input class="fabric-edit-input" list="fabricAutocomplete" data-fabric-edit="${escapeAttribute(fabric.id)}" value="${escapeAttribute(fabric.name)}"></td>
+        <td><input class="composition-edit-input" list="compositionAutocomplete" data-composition-edit="${escapeAttribute(fabric.id)}" value="${escapeAttribute(getCompositionLabel(fabric.compositionId))}"></td>
         <td class="number-cell"></td>
         <td class="number-cell calc-ratio">0.000%</td>
         ${materials.map((material) => `<td class="number-cell calc-material" data-material-id="${escapeAttribute(material.id)}">0.000%</td>`).join("")}
@@ -589,8 +643,22 @@ function renderFabricTable() {
       input.dataset.fabricId = fabric.id;
       input.addEventListener("input", handleYyInput);
       tr.children[3].append(input);
+      tr.querySelector("[data-fabric-edit]").addEventListener("change", handleDraftFabricEdit);
+      tr.querySelector("[data-composition-edit]").addEventListener("change", handleDraftCompositionEdit);
       els.fabricTableBody.append(tr);
     });
+
+  // Unmatched imported materials stay visible as editable draft-only rows. They are
+  // never silently added to Fabric DB and only participate in calculation after a
+  // user maps them to an existing fabric.
+  (activeDraft()?.rows || []).filter((row) => !row.matchedFabricId).forEach((row, index) => {
+    const tr = document.createElement("tr"); tr.className = `match-${row.confidence.toLowerCase()}`;
+    tr.innerHTML = `<td>—</td><td><input class="fabric-edit-input" list="fabricAutocomplete" data-imported-fabric="${index}" value="${escapeAttribute(row.matchedFabricName || row.material)}"><span class="source-badge">Source: ${escapeHtml(row.material)} · ${escapeHtml(row.sourceSheet)} · ${escapeHtml(row.sourceCell)}</span><span class="not-in-db">Not in Fabric DB</span></td><td><input class="composition-edit-input" list="compositionAutocomplete" data-imported-composition="${index}" value="${escapeAttribute(row.composition)}"></td><td class="number-cell"><input class="yy-input" type="number" min="0" step="0.001" data-imported-yy="${index}" value="${row.usage}"></td><td class="number-cell">${escapeHtml(row.confidence)}</td>${materials.map(() => "<td class=\"number-cell\">—</td>").join("")}`;
+    tr.querySelector("[data-imported-fabric]").addEventListener("change", updateImportedDraftRow);
+    tr.querySelector("[data-imported-composition]").addEventListener("change", updateImportedDraftRow);
+    tr.querySelector("[data-imported-yy]").addEventListener("input", updateImportedDraftRow);
+    els.fabricTableBody.append(tr);
+  });
 
   refreshFabricCalculations();
 }
@@ -600,6 +668,7 @@ function handleYyInput(event) {
   const yy = parseYy(event.target.value);
   if (yy > 0) currentYyByFabricId[fabricId] = yy;
   else delete currentYyByFabricId[fabricId];
+  syncActiveDraft();
   refreshFabricCalculations();
 }
 
@@ -618,6 +687,7 @@ function refreshFabricCalculations() {
 }
 
 function getCurrentStyle() {
+  syncActiveDraft();
   return {
     name: normalizeStyleName(els.styleNameInput.value),
     yyByFabricId: { ...currentYyByFabricId },
@@ -695,19 +765,24 @@ function renderSavedStyles() {
 function loadStyle(name) {
   const style = appState.styles[name];
   if (!style) return;
+  newDraft(style, { dirty: false });
   els.styleNameInput.value = style.name;
   currentYyByFabricId = sanitizeYyMap(style.yyByFabricId);
+  renderStyleDraftList();
   renderFabricTable();
   renderSavedStyles();
   activateTab("styleInput");
 }
 
 function newStyle() {
+  syncActiveDraft();
+  newDraft();
   els.styleNameInput.value = "";
   currentYyByFabricId = {};
   els.fabricSearchInput.value = "";
   renderFabricTable();
   renderSavedStyles();
+  renderStyleDraftList();
   els.styleNameInput.focus();
 }
 
@@ -722,14 +797,18 @@ function saveCurrentStyle() {
   if (existingName && existingName !== style.name) style.name = existingName;
   if (existingName && !confirm(`'${existingName}' 스타일을 업데이트할까요?`)) return;
   appState.styles[style.name] = style;
+  const draft = activeDraft();
+  if (draft) { draft.styleName = style.name; draft.dirty = false; draft.yyByFabricId = { ...style.yyByFabricId }; }
   saveStore();
   renderSavedStyles();
+  renderStyleDraftList();
   showMessage("저장되었습니다.");
 }
 
 function clearYy() {
   if (!confirm("현재 화면의 YY 입력값을 모두 지울까요? 저장된 데이터는 저장 버튼을 누르기 전까지 변경되지 않습니다.")) return;
   currentYyByFabricId = {};
+  syncActiveDraft();
   renderFabricTable();
 }
 
@@ -1497,6 +1576,190 @@ function validateCareLabelsForExport(styles) {
     });
   });
   return errors;
+}
+
+/* Excel import ---------------------------------------------------------- */
+function normalizeText(value) {
+  return String(value ?? "").replace(/[\r\n\t\u3000]+/g, " ").replace(/^[\s\-_:;,.]+|[\s\-_:;,.]+$/g, "").replace(/\s+/g, " ").trim().toUpperCase();
+}
+function fabricMatchingKey(value) {
+  return normalizeText(value).replace(/[\s\-_/,.:]/g, "").replace(/\(\s*/g, "(").replace(/\s*\)/g, ")");
+}
+function tokens(value) { return normalizeText(value).match(/[A-Z]+|\d+(?:\.\d+)?/g) || []; }
+function levenshtein(a, b) {
+  if (a === b) return 0; const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) { let prev = i; for (let j = 1; j <= b.length; j += 1) { const old = row[j]; row[j] = Math.min(row[j] + 1, prev + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = old; } } return row[b.length];
+}
+function matchFabric(source) {
+  const raw = normalizeText(source); const key = fabricMatchingKey(source); const sourceTokens = tokens(source); const numberTokens = sourceTokens.filter((x) => /^\d/.test(x));
+  let best = null;
+  appState.fabrics.forEach((fabric) => {
+    const candidateKey = fabricMatchingKey(fabric.name); const candidateTokens = tokens(fabric.name); const candidateNumbers = candidateTokens.filter((x) => /^\d/.test(x));
+    let score = key === candidateKey ? 1 : 0;
+    if (!score) {
+      const overlap = sourceTokens.filter((t) => candidateTokens.includes(t)).length / Math.max(sourceTokens.length, candidateTokens.length, 1);
+      const similarity = 1 - levenshtein(key, candidateKey) / Math.max(key.length, candidateKey.length, 1);
+      const contains = key.includes(candidateKey) || candidateKey.includes(key) ? .88 : 0;
+      score = Math.max(contains, similarity * .62 + overlap * .38);
+      // A complete candidate embedded in a longer printed-material description is stronger
+      // evidence than unrelated style numbers that also appear in that description.
+      if (!(key.includes(candidateKey) || candidateKey.includes(key)) && numberTokens.length && !numberTokens.every((n) => candidateNumbers.includes(n))) score *= .42;
+    }
+    if (!best || score > best.score) best = { fabric, score };
+  });
+  if (!best || best.score < .55) return { fabric: null, score: best?.score || 0, confidence: "UNMATCHED", matchType: "UNMATCHED" };
+  return { ...best, confidence: best.score === 1 ? "EXACT" : best.score >= .88 ? "HIGH" : best.score >= .72 ? "MEDIUM" : "LOW", matchType: best.score === 1 ? "EXACT" : "FUZZY" };
+}
+function numericUsage(value) { const clean = String(value ?? "").trim().replace(/,/g, ""); if (!clean || /^(?:-|N\/?A)$/i.test(clean)) return 0; const n = Number(clean); return Number.isFinite(n) && n > 0 ? n : 0; }
+function sheetMatrix(sheet) {
+  const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false });
+  // SheetJS returns the value only at the anchor of a merged range.  Keeping that
+  // address (rather than copying it into every visual cell) prevents a merged NET
+  // or consumption value from being counted more than once.
+  return matrix;
+}
+function cellContains(value, word) { return normalizeText(value).includes(normalizeText(word)); }
+function isAccessory(text) { return /(TPR|ZIPPER|BUTTON|LABEL|WEBBING|TAPE|HOOK|BUCKLE|VELCRO|ELASTIC|BEMIS|RHEON)/.test(normalizeText(text)); }
+function typeFromMatrix(matrix, fileName) {
+  const text = matrix.slice(0, 80).flat().map(normalizeText).join(" |");
+  if (text.includes("자재별 패턴부위".toUpperCase()) && text.includes("소요량")) return "PANT";
+  if (text.includes("원단명") && text.includes("원단 소요량".toUpperCase())) return "JERSEY";
+  if (text.includes("자 재") && text.includes("NET") && text.includes("S/F")) return "GLOVE";
+  return "UNKNOWN";
+}
+function sizeAt(matrix, rowIndex) { for (let r = rowIndex; r >= Math.max(0, rowIndex - 25); r -= 1) { const text = matrix[r].map(normalizeText).join(" "); const hit = text.match(/SIZE\s*[:：]?\s*([^|]+)|SIZE\s+([^|]+)/); if (hit) return normalizeText(hit[1] || hit[2]); } return "DEFAULT"; }
+function styleNameFromWorkbook(workbook, fileName) {
+  for (const name of workbook.SheetNames) { const matrix = sheetMatrix(workbook.Sheets[name]); for (const row of matrix.slice(0, 8)) { const line = row.map(String).join(" "); const hit = line.match(/(?:스타일|STYLE)\s*[:：]?\s*([A-Z0-9 #_-]+(?:PANT|JERSEY|GLOVE)[A-Z0-9 #_-]*)/i) || line.match(/(?:FLY RACING\s*[- ]*)?(#?\s*\d+\s+EVO\s+(?:PANT|JERSEY|GLOVE))/i); if (hit) return cleanStyleName(hit[1]); } }
+  return cleanStyleName(fileName.replace(/\.[^.]+$/, ""));
+}
+function cleanStyleName(value) { return String(value).replace(/FLY RACING/ig, "").replace(/#/g, " ").replace(/\b\d+차\b|소요량|\b\d{6,8}\b|\(\d+\s*=\s*XL\)|\(\d{1,2}\.\d{1,2}\)|\bL\d+\b/ig, " ").replace(/\s+/g, " ").trim().replace(/^[- ]+|[- ]+$/g, ""); }
+function headerColumn(row, predicate) { return row.findIndex((cell) => predicate(normalizeText(cell))); }
+function makeRecord(material, usage, sizeGroup, sheet, row, col, parsedType) {
+  const match = matchFabric(material);
+  return { material: String(material).trim(), usage, sizeGroup, section: sheet, sourceCell: `${sheet}!R${row + 1}C${col + 1}`, sourceSheet: sheet, parsedType, matchedFabricId: match.fabric?.id || null, matchedFabricName: match.fabric?.name || "", composition: match.fabric ? getCompositionLabel(match.fabric.compositionId) : "", matchScore: match.score, confidence: match.confidence, matchType: match.matchType };
+}
+function parsePant(matrix, sheetName) {
+  const records = []; let materialCol = -1; let usageCol = -1; let currentSize = "DEFAULT";
+  matrix.forEach((row, r) => {
+    const joined = row.map(normalizeText).join("|");
+    if (joined.includes("자재별 패턴부위".toUpperCase())) { materialCol = headerColumn(row, (v) => v.includes("자재별")); usageCol = headerColumn(row, (v) => v === "소요량"); return; }
+    const sizeText = row.map(normalizeText).join(" "); if (sizeText.includes("SIZE")) currentSize = sizeAt(matrix, r);
+    if (materialCol < 0 || usageCol < 0) return;
+    const material = String(row[materialCol] || "").trim(); const usage = numericUsage(row[usageCol]);
+    if (!material || !usage || /^(SIZE|디지털 프린트|\d+$)/i.test(material)) return;
+    const match = matchFabric(material); if (!match.fabric && isAccessory(material)) return;
+    records.push(makeRecord(material, usage, currentSize, sheetName, r, usageCol, "PANT"));
+  }); return records;
+}
+function parseJersey(matrix, sheetName) {
+  const records = []; let materialCol = -1; let usageCol = -1; let section = "";
+  matrix.forEach((row, r) => {
+    const text = row.map(normalizeText).join("|");
+    if (text.includes("부자재")) { materialCol = -1; usageCol = -1; return; }
+    if (text.includes("원단명")) {
+      materialCol = headerColumn(row, (v) => v === "원단명");
+      usageCol = headerColumn(row, (v) => (v.includes("원단 소요량") || v.startsWith("소요량")) && !v.includes("LOSS"));
+      section = `${sheetName}:${sizeAt(matrix, r)}`; return;
+    }
+    if (materialCol < 0 || usageCol < 0) return;
+    const material = String(row[materialCol] || "").trim(); const usage = numericUsage(row[usageCol]);
+    if (!material || !usage) return;
+    const match = matchFabric(material); if (!match.fabric && isAccessory(material)) return;
+    records.push(makeRecord(material, usage, section, sheetName, r, usageCol, "JERSEY"));
+  }); return records;
+}
+function parseGlove(matrix, sheetName) {
+  const records = []; let materialCol = -1; let netCol = -1; let currentMaterial = ""; let group = "DEFAULT";
+  matrix.forEach((row, r) => {
+    const text = row.map(normalizeText).join("|");
+    if (text.includes("NET") && text.includes("S/F") && text.includes("자 재")) { materialCol = headerColumn(row, (v) => v.replace(/\s/g, "") === "자재"); netCol = headerColumn(row, (v) => v === "NET"); group = sizeAt(matrix, r); return; }
+    if (materialCol < 0 || netCol < 0) return;
+    if (String(row[materialCol] || "").trim()) currentMaterial = String(row[materialCol]).trim();
+    const usage = numericUsage(row[netCol]); if (!currentMaterial || !usage) return;
+    const match = matchFabric(currentMaterial); if (!match.fabric && isAccessory(currentMaterial)) return;
+    records.push(makeRecord(currentMaterial, usage, group, sheetName, r, netCol, "GLOVE"));
+  }); return records;
+}
+function aggregateUsage(records) {
+  const unique = new Map(); records.forEach((record) => { if (!unique.has(record.sourceCell)) unique.set(record.sourceCell, record); });
+  const byFabric = new Map();
+  unique.forEach((record) => { const id = record.matchedFabricId || `source:${fabricMatchingKey(record.material)}`; const bySize = byFabric.get(id) || new Map(); const group = record.sizeGroup || "DEFAULT"; const bucket = bySize.get(group) || []; bucket.push(record); bySize.set(group, bucket); byFabric.set(id, bySize); });
+  return Array.from(byFabric.values()).map((groups) => {
+    const totals = Array.from(groups.values()).map((items) => ({ items, total: items.reduce((sum, item) => sum + item.usage, 0) })); const chosen = totals.sort((a, b) => b.total - a.total)[0]; const base = chosen.items[0];
+    return { ...base, usage: chosen.total, sourceUsage: chosen.total, sizeGroup: chosen.items.map((i) => i.sizeGroup).join(", "), rule: `${chosen.items.length > 1 ? "SUM WITHIN SIZE + " : ""}${groups.size > 1 ? "SIZE MAX" : base.matchType}` , records: chosen.items };
+  });
+}
+function parseConsumptionWorkbook(file, workbook) {
+  const parsed = [];
+  workbook.SheetNames.forEach((sheetName) => { const matrix = sheetMatrix(workbook.Sheets[sheetName]); const type = typeFromMatrix(matrix, file.name); if (type === "PANT") parsed.push(...parsePant(matrix, sheetName)); else if (type === "JERSEY") parsed.push(...parseJersey(matrix, sheetName)); else if (type === "GLOVE" && (!/L\d/i.test(file.name) || sheetName.toUpperCase().includes((file.name.match(/L\d/i) || [""])[0].toUpperCase()))) parsed.push(...parseGlove(matrix, sheetName)); });
+  const detectedType = parsed[0]?.parsedType || "UNKNOWN"; return { file, styleName: styleNameFromWorkbook(workbook, file.name), detectedType, rows: aggregateUsage(parsed), error: parsed.length ? "" : detectedType === "UNKNOWN" ? "Unknown file format" : "No numeric usage found" };
+}
+async function readWorkbook(file) { if (!window.XLSX) throw new Error("SheetJS library not loaded"); return XLSX.read(await file.arrayBuffer(), { type: "array", cellFormula: false, cellText: true }); }
+async function handleConsumptionFiles(event) {
+  const files = Array.from(event.target.files || []); event.target.value = ""; if (!files.length) return;
+  const results = await Promise.all(files.map(async (file) => { try { return parseConsumptionWorkbook(file, await readWorkbook(file)); } catch (error) { return { file, styleName: cleanStyleName(file.name), detectedType: "UNKNOWN", rows: [], error: error.message || "Unknown file format" }; } }));
+  pendingUpload = { kind: "style", files: results }; renderStyleUploadPreview();
+}
+
+function renderAutocompleteLists() {
+  const fabrics = document.getElementById("fabricAutocomplete"); const compositions = document.getElementById("compositionAutocomplete");
+  if (fabrics) fabrics.innerHTML = appState.fabrics.map((f) => `<option value="${escapeAttribute(f.name)}"></option>`).join("");
+  if (compositions) compositions.innerHTML = appState.compositions.map((c) => `<option value="${escapeAttribute(c.label)}"></option>`).join("");
+}
+function handleDraftFabricEdit(event) {
+  const oldId = event.target.dataset.fabricEdit; const chosen = appState.fabrics.find((f) => fabricMatchingKey(f.name) === fabricMatchingKey(event.target.value));
+  if (!chosen || chosen.id === oldId) { renderFabricTable(); return; }
+  const yy = currentYyByFabricId[oldId]; if (yy) { currentYyByFabricId[chosen.id] = yy; delete currentYyByFabricId[oldId]; }
+  syncActiveDraft(); renderFabricTable();
+}
+function handleDraftCompositionEdit(event) {
+  const fabric = appState.fabrics.find((f) => f.id === event.target.dataset.compositionEdit); const composition = appState.compositions.find((c) => normalizeText(c.label) === normalizeText(event.target.value));
+  if (fabric && composition && dbEditMode) fabric.compositionId = composition.id;
+  renderFabricTable();
+}
+function updateImportedDraftRow(event) {
+  const index = Number(event.target.dataset.importedFabric ?? event.target.dataset.importedComposition ?? event.target.dataset.importedYy); const row = (activeDraft()?.rows || []).filter((item) => !item.matchedFabricId)[index]; if (!row) return;
+  const tr = event.target.closest("tr"); const fabricInput = tr.querySelector("[data-imported-fabric]"); const compositionInput = tr.querySelector("[data-imported-composition]"); const yyInput = tr.querySelector("[data-imported-yy]"); const match = matchFabric(fabricInput.value);
+  row.matchedFabricName = fabricInput.value.trim(); row.composition = compositionInput.value.trim(); row.usage = numericUsage(yyInput.value); row.matchedFabricId = match.fabric?.id || null; row.matchScore = match.score; row.confidence = match.confidence;
+  if (row.matchedFabricId) currentYyByFabricId[row.matchedFabricId] = (currentYyByFabricId[row.matchedFabricId] || 0) + row.usage;
+  syncActiveDraft(); renderFabricTable();
+}
+function showUploadPreview(title, body) { els.uploadPreviewTitle.textContent = title; els.uploadPreviewBody.innerHTML = body; els.uploadPreviewModal.classList.remove("hidden"); }
+function closeUploadPreview() { pendingUpload = null; els.uploadPreviewModal.classList.add("hidden"); }
+function renderStyleUploadPreview() {
+  const files = pendingUpload.files;
+  showUploadPreview("소요량표 Import Preview", files.map((item, index) => `
+    <section class="preview-file" data-preview-file="${index}"><div class="preview-meta"><div><b>Style Name</b><input data-style-name value="${escapeAttribute(item.styleName)}"></div><div><b>Detected Type</b><select data-file-type><option ${item.detectedType === "PANT" ? "selected" : ""}>PANT</option><option ${item.detectedType === "JERSEY" ? "selected" : ""}>JERSEY</option><option ${item.detectedType === "GLOVE" ? "selected" : ""}>GLOVE</option><option ${item.detectedType === "UNKNOWN" ? "selected" : ""}>UNKNOWN</option></select></div><div><b>Source File</b><br>${escapeHtml(item.file.name)}</div></div>
+    ${item.error ? `<p class="error-text">${escapeHtml(item.error)}</p>` : ""}<div class="table-wrap"><table class="data-table preview-table"><thead><tr><th>Source Material</th><th>Matched Fabric</th><th>Composition</th><th>Parsed YY</th><th>Confidence</th><th>Rule</th></tr></thead><tbody>${item.rows.map((row, rowIndex) => `<tr class="match-${row.confidence.toLowerCase()}"><td>${escapeHtml(row.material)}</td><td><input list="fabricAutocomplete" data-row-fabric="${rowIndex}" value="${escapeAttribute(row.matchedFabricName)}" title="Source: ${escapeAttribute(row.material)}&#10;Matched: ${escapeAttribute(row.matchedFabricName)}&#10;Confidence: ${Math.round(row.matchScore * 100)}%"></td><td><input list="compositionAutocomplete" data-row-composition="${rowIndex}" value="${escapeAttribute(row.composition)}"></td><td><input type="number" min="0" step="0.0001" data-row-usage="${rowIndex}" value="${row.usage}"></td><td>${escapeHtml(row.confidence)} ${Math.round(row.matchScore * 100)}%</td><td>${escapeHtml(row.rule)}</td></tr>`).join("")}</tbody></table></div></section>`).join(""));
+  els.importUploadPreviewBtn.textContent = files.length > 1 ? "Import All" : "Import";
+}
+function readPreviewEdits() {
+  els.uploadPreviewBody.querySelectorAll("[data-preview-file]").forEach((section) => { const item = pendingUpload.files[Number(section.dataset.previewFile)]; item.styleName = section.querySelector("[data-style-name]").value.trim(); item.detectedType = section.querySelector("[data-file-type]").value; section.querySelectorAll("[data-row-fabric]").forEach((input) => { const row = item.rows[Number(input.dataset.rowFabric)]; const match = matchFabric(input.value); row.matchedFabricName = input.value.trim(); row.matchedFabricId = match.fabric?.id || null; row.composition = section.querySelector(`[data-row-composition="${input.dataset.rowFabric}"]`).value.trim(); row.usage = numericUsage(section.querySelector(`[data-row-usage="${input.dataset.rowFabric}"]`).value); row.confidence = match.confidence; }); });
+}
+function commitUploadPreview() {
+  if (!pendingUpload) return; readPreviewEdits();
+  if (pendingUpload.kind === "fabric") { commitFabricImport(); return; }
+  const importedCount = pendingUpload.files.length;
+  pendingUpload.files.forEach((fileResult) => { const yyByFabricId = {}; fileResult.rows.forEach((row) => { if (row.matchedFabricId && row.usage > 0) yyByFabricId[row.matchedFabricId] = (yyByFabricId[row.matchedFabricId] || 0) + row.usage; }); newDraft({ name: fileResult.styleName, yyByFabricId }, { rows: fileResult.rows, sourceFile: fileResult.file.name, parsedType: fileResult.detectedType, dirty: true }); });
+  closeUploadPreview(); activateDraft(activeStyleId); showMessage(`${importedCount}개 Style draft를 생성했습니다.`);
+}
+function downloadFabricTemplate() {
+  if (!window.ExcelJS) { showMessage("ExcelJS 라이브러리가 로드되지 않았습니다.", "error"); return; }
+  const workbook = new ExcelJS.Workbook(); const sheet = workbook.addWorksheet("Fabric Import"); sheet.columns = [{ width: 48 }, { width: 36 }]; sheet.addRow(["Fabric Name", "Composition"]); sheet.addRows([["JX-19 (POLY)", "POLYESTER100%"], ["ONE MESH POLY #BT-102", "POLYESTER90%+SPANDEX10%"], ["ES#PSDW-05 (POLY) (WRC0)", "POLYESTER92%+POLYURETHANE8%"]]);
+  sheet.getRow(1).eachCell((cell) => { cell.font = { bold: true, color: { argb: "FFFFFFFF" } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F6F66" } }; cell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } }; });
+  workbook.xlsx.writeBuffer().then((buffer) => downloadBlob(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "fabric-import-template.xlsx"));
+}
+async function handleFabricExcelUpload(event) {
+  const file = event.target.files[0]; event.target.value = ""; if (!file) return;
+  try { const book = await readWorkbook(file); const rows = []; book.SheetNames.forEach((name) => { const matrix = sheetMatrix(book.Sheets[name]); matrix.forEach((row, index) => { const nameCol = headerColumn(row, (v) => v === "FABRIC NAME"); const compCol = headerColumn(row, (v) => v === "COMPOSITION"); if (nameCol < 0 || compCol < 0) return; matrix.slice(index + 1).forEach((data) => { if (String(data[nameCol] || "").trim() || String(data[compCol] || "").trim()) rows.push({ name: String(data[nameCol] || "").trim(), composition: String(data[compCol] || "").trim() }); }); }); }); if (!rows.length) throw new Error("Fabric Name and Composition headers not found"); pendingUpload = { kind: "fabric", file, rows }; renderFabricImportPreview(); } catch (error) { showMessage(`Fabric Excel 읽기 실패: ${error.message}`, "error"); }
+}
+function renderFabricImportPreview() {
+  const rows = pendingUpload.rows; showUploadPreview("Fabric DB Import Preview", `<div class="table-wrap"><table class="data-table preview-table"><thead><tr><th>Fabric Name</th><th>Composition</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows.map((row, index) => { const existing = appState.fabrics.find((f) => normalizeText(f.name) === normalizeText(row.name)); const comp = appState.compositions.find((c) => normalizeText(c.label) === normalizeText(row.composition)); const status = !row.name || !row.composition ? "EMPTY" : existing ? "DUPLICATE" : !comp ? "INVALID COMPOSITION" : "NEW"; return `<tr><td><input data-fabric-import-name="${index}" value="${escapeAttribute(row.name)}"></td><td><input list="compositionAutocomplete" data-fabric-import-composition="${index}" value="${escapeAttribute(row.composition)}"></td><td>${status}</td><td>${existing ? "Skip" : "Add"}</td></tr>`; }).join("")}</tbody></table></div>`); els.importUploadPreviewBtn.textContent = "Import";
+}
+function commitFabricImport() {
+  els.uploadPreviewBody.querySelectorAll("[data-fabric-import-name]").forEach((input) => { const row = pendingUpload.rows[Number(input.dataset.fabricImportName)]; row.name = input.value.trim(); row.composition = els.uploadPreviewBody.querySelector(`[data-fabric-import-composition="${input.dataset.fabricImportName}"]`).value.trim(); });
+  let added = 0; pendingUpload.rows.forEach((row) => { const composition = appState.compositions.find((c) => normalizeText(c.label) === normalizeText(row.composition)); if (!row.name || !composition || appState.fabrics.some((f) => normalizeText(f.name) === normalizeText(row.name))) return; appState.fabrics.push({ id: uniqueId("fabric_import", appState.fabrics.map((f) => f.id)), name: row.name, compositionId: composition.id, order: nextOrder(appState.fabrics) }); added += 1; });
+  saveStore(); closeUploadPreview(); renderAll(); showMessage(`${added}개 Fabric을 추가했습니다.`);
 }
 
 function addCareLabelBlocks(sheet, entry, summaryHeaderRow, summaryHeight, lastColumn) {

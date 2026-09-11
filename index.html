@@ -6,6 +6,7 @@
     <title>케어라벨 혼용률 계산기</title>
     <link rel="stylesheet" href="style.css">
     <script defer src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script defer src="app.js"></script>
   </head>
   <body>
@@ -27,6 +28,14 @@
 
     <main class="app-shell">
       <section id="styleInput" class="tab-panel active">
+        <div class="style-workspace">
+          <aside class="draft-sidebar">
+            <button type="button" id="sidebarNewStyleBtn" class="primary">+ New Style</button>
+            <label class="file-button upload-button" for="consumptionUploadInput">소요량표 업로드</label>
+            <input id="consumptionUploadInput" class="sr-only" type="file" accept=".xlsx,.xls" multiple>
+            <div id="styleDraftList" class="draft-list"></div>
+          </aside>
+          <div class="style-editor">
         <div class="toolbar">
           <div class="style-controls">
             <label class="field-label" for="styleNameInput">Style Name</label>
@@ -71,6 +80,8 @@
             </table>
             <div id="currentCareLabelArea" class="current-care-label-area"></div>
           </aside>
+        </div>
+          </div>
         </div>
       </section>
 
@@ -170,6 +181,9 @@
               <option value="composition">Composition</option>
             </select>
             <button type="button" id="addFabricBtn" class="primary db-edit-only" disabled>원단 추가</button>
+            <button type="button" id="fabricTemplateBtn">Template Download</button>
+            <label class="file-button" for="fabricExcelUploadInput">Fabric Excel Upload</label>
+            <input id="fabricExcelUploadInput" class="sr-only" type="file" accept=".xlsx,.xls">
           </div>
           <div class="table-wrap db-table-wrap">
             <table class="data-table">
@@ -212,5 +226,14 @@
         </div>
       </section>
     </main>
+    <div id="uploadPreviewModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Excel import preview">
+      <div class="modal-card">
+        <div class="panel-title-row"><h2 id="uploadPreviewTitle">Import Preview</h2><button type="button" id="closeUploadPreviewBtn">닫기</button></div>
+        <div id="uploadPreviewBody"></div>
+        <div class="button-row modal-actions"><button type="button" id="cancelUploadPreviewBtn">Cancel</button><button type="button" id="importUploadPreviewBtn" class="primary">Import</button></div>
+      </div>
+    </div>
+    <datalist id="fabricAutocomplete"></datalist>
+    <datalist id="compositionAutocomplete"></datalist>
   </body>
 </html>
