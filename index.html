@@ -237,6 +237,20 @@
         <div class="button-row modal-actions"><button type="button" id="cancelUploadPreviewBtn">Cancel</button><button type="button" id="importUploadPreviewBtn" class="primary">Import</button></div>
       </div>
     </div>
+    <div id="compositionBuilderModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Composition builder">
+      <div class="modal-card composition-builder">
+        <div class="panel-title-row"><h2>새 Composition 등록</h2><button type="button" id="closeCompositionBuilderBtn">닫기</button></div>
+        <label class="field-label" for="compositionBuilderName">Composition Name</label>
+        <input id="compositionBuilderName" type="text" placeholder="Composition 이름">
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Material</th><th>Ratio</th><th>Action</th></tr></thead><tbody id="compositionBuilderRows"></tbody></table></div>
+        <div class="button-row"><button type="button" id="addCompositionMaterialBtn">+ Material 추가</button><button type="button" id="addBuilderMaterialBtn">+ 새 Material 추가</button><strong id="compositionBuilderTotal">Total: 0.00%</strong></div>
+        <p id="compositionBuilderError" class="error-text hidden">Composition total must equal 100%.</p>
+        <div class="button-row modal-actions"><button type="button" id="cancelCompositionBuilderBtn">취소</button><button type="button" id="applyTemporaryCompositionBtn">현재 원단에만 적용</button><button type="button" id="saveCompositionToDbBtn" class="primary">DB에 저장하고 적용</button></div>
+      </div>
+    </div>
+    <div id="materialBuilderModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Material builder">
+      <div class="modal-card"><div class="panel-title-row"><h2>새 Material 추가</h2><button type="button" id="closeMaterialBuilderBtn">닫기</button></div><label class="field-label">Material Name<input id="builderMaterialName" type="text"></label><label class="field-label">Internal Label<input id="builderMaterialInternalLabel" type="text"></label><label class="field-label">US Label<input id="builderMaterialUsLabel" type="text"></label><label class="field-label">EU Label<input id="builderMaterialEuLabel" type="text"></label><div class="button-row modal-actions"><button type="button" id="cancelMaterialBuilderBtn">취소</button><button type="button" id="saveBuilderMaterialBtn" class="primary">추가</button></div></div>
+    </div>
     <datalist id="fabricAutocomplete"></datalist>
     <datalist id="compositionAutocomplete"></datalist>
   </body>

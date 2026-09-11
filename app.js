@@ -124,6 +124,8 @@ let selectedStyleIds = new Set();
 let undoStack = [];
 let redoStack = [];
 let inputHistoryBefore = null;
+let compositionBuilderTarget = null;
+let compositionBuilderState = null;
 let lastExtractedStyles = [];
 let dbEditMode = false;
 let dbEditSnapshot = null;
@@ -153,6 +155,7 @@ function bindElements() {
     "fabricTemplateBtn", "fabricExcelUploadInput", "uploadPreviewModal", "uploadPreviewTitle", "uploadPreviewBody",
     "closeUploadPreviewBtn", "cancelUploadPreviewBtn", "importUploadPreviewBtn", "undoBtn", "redoBtn",
     "selectAllDraftsBtn", "deleteSelectedDraftsBtn", "addDraftFabricRowBtn",
+    "compositionBuilderModal", "closeCompositionBuilderBtn", "compositionBuilderName", "compositionBuilderRows", "compositionBuilderTotal", "compositionBuilderError", "addCompositionMaterialBtn", "addBuilderMaterialBtn", "cancelCompositionBuilderBtn", "applyTemporaryCompositionBtn", "saveCompositionToDbBtn", "materialBuilderModal", "closeMaterialBuilderBtn", "builderMaterialName", "builderMaterialInternalLabel", "builderMaterialUsLabel", "builderMaterialEuLabel", "cancelMaterialBuilderBtn", "saveBuilderMaterialBtn",
   ].forEach((id) => { els[id] = document.getElementById(id); });
 }
 
@@ -170,6 +173,15 @@ function bindEvents() {
   els.addDraftFabricRowBtn.addEventListener("click", addDraftFabricRow);
   els.undoBtn.addEventListener("click", undoWorkspace);
   els.redoBtn.addEventListener("click", redoWorkspace);
+  els.closeCompositionBuilderBtn.addEventListener("click", closeCompositionBuilder);
+  els.cancelCompositionBuilderBtn.addEventListener("click", closeCompositionBuilder);
+  els.addCompositionMaterialBtn.addEventListener("click", () => { compositionBuilderState.rows.push({ materialId: "", ratio: "" }); renderCompositionBuilder(); });
+  els.addBuilderMaterialBtn.addEventListener("click", openMaterialBuilder);
+  els.applyTemporaryCompositionBtn.addEventListener("click", () => applyBuiltComposition(false));
+  els.saveCompositionToDbBtn.addEventListener("click", () => applyBuiltComposition(true));
+  els.closeMaterialBuilderBtn.addEventListener("click", closeMaterialBuilder);
+  els.cancelMaterialBuilderBtn.addEventListener("click", closeMaterialBuilder);
+  els.saveBuilderMaterialBtn.addEventListener("click", saveBuilderMaterial);
   els.consumptionUploadInput.addEventListener("change", handleConsumptionFiles);
   els.saveStyleBtn.addEventListener("click", saveCurrentStyle);
   els.fabricSearchInput.addEventListener("input", renderFabricTable);
@@ -359,6 +371,7 @@ function cloneStyle(style) {
   return {
     name: normalizeStyleName(style.name),
     yyByFabricId: sanitizeYyMap(style.yyByFabricId, true),
+    rows: Array.isArray(style.rows) ? clone(style.rows) : undefined,
   };
 }
 
@@ -427,7 +440,12 @@ function deleteDrafts(ids) { const targets = ids.filter((id) => styleDrafts[id])
 
 function calculateStyle(style) {
   const materials = getMaterials();
-  const rows = appState.fabrics
+  const rows = Array.isArray(style.rows) ? style.rows.map((row, index) => ({
+    id: row.rowId || row.fabricId || `custom_${index}`,
+    fabricName: row.fabricName || "(Unnamed Fabric)",
+    compositionLabel: getRowComposition(row)?.label || row.composition || "",
+    yy: parseYy(row.yy), ratio: 0, materialValues: emptyMaterialMap(), composition: getRowComposition(row), sourceRow: row,
+  })) : appState.fabrics
     .slice()
     .sort((a, b) => Number(a.order) - Number(b.order))
     .map((fabric) => ({
@@ -437,6 +455,7 @@ function calculateStyle(style) {
       yy: parseYy(style.yyByFabricId?.[fabric.id]),
       ratio: 0,
       materialValues: emptyMaterialMap(),
+      composition: getComposition(fabric.compositionId),
     }));
   const usedRows = rows.filter((row) => row.yy > 0);
   const totalYy = usedRows.reduce((sum, row) => sum + row.yy, 0);
@@ -444,7 +463,7 @@ function calculateStyle(style) {
 
   if (totalYy > 0) {
     usedRows.forEach((row) => {
-      const composition = getComposition(row.compositionId);
+      const composition = row.composition || getComposition(row.compositionId);
       row.ratio = row.yy / totalYy;
       materials.forEach((material) => {
         const componentRatio = Number(composition?.components?.[material.id] || 0) / 100;
@@ -463,6 +482,13 @@ function calculateStyle(style) {
     totals,
     grandTotal: materials.reduce((sum, material) => sum + totals[material.id], 0),
   };
+}
+
+function getRowComposition(row) {
+  if (row?.compositionDefinition?.components) return row.compositionDefinition;
+  if (row?.composition && typeof row.composition === "object" && row.composition.components) return row.composition;
+  if (row?.compositionId) return getComposition(row.compositionId);
+  return null;
 }
 
 function emptyMaterialMap() {
@@ -700,12 +726,15 @@ function renderImportedFabricTable(materials) {
   (draft.rows || []).forEach((row, index) => {
     const tr = document.createElement("tr"); tr.className = `match-${(row.confidence || "UNMATCHED").toLowerCase()}`;
     const isDbFabric = Boolean(row.fabricId);
-    tr.innerHTML = `<td>${index + 1}</td><td><input class="fabric-edit-input" list="fabricAutocomplete" data-import-row-fabric="${escapeAttribute(row.rowId)}" value="${escapeAttribute(row.fabricName || "")}" title="Source: ${escapeAttribute(row.source?.sourceMaterialName || "")}\nMatched: ${escapeAttribute(row.fabricName || "")}\nConfidence: ${Math.round((row.matchScore || 0) * 100)}%">${row.source?.sourceMaterialName ? `<span class="source-badge">Source: ${escapeHtml(row.source.sourceMaterialName)} · ${escapeHtml(row.source.sourceSheet || "")}</span>` : ""}${!isDbFabric && row.fabricName ? '<span class="not-in-db">Not in Fabric DB</span>' : ""}</td><td><input class="composition-edit-input" list="compositionAutocomplete" data-import-row-composition="${escapeAttribute(row.rowId)}" value="${escapeAttribute(row.composition || "")}"></td><td class="number-cell"><input class="yy-input" type="number" min="0" step="0.0001" data-import-row-yy="${escapeAttribute(row.rowId)}" value="${row.yy || ""}"></td><td class="number-cell">${escapeHtml(row.confidence || "")}</td>${materials.map(() => "<td class=\"number-cell\">—</td>").join("")}<td><button type="button" class="mini-button danger" data-import-row-delete="${escapeAttribute(row.rowId)}">X</button></td>`;
+    const compositionLabel = getRowComposition(row)?.label || row.composition || "";
+    tr.innerHTML = `<td>${index + 1}</td><td><input class="fabric-edit-input" list="fabricAutocomplete" data-import-row-fabric="${escapeAttribute(row.rowId)}" value="${escapeAttribute(row.fabricName || "")}" title="Source: ${escapeAttribute(row.source?.sourceMaterialName || "")}\nMatched: ${escapeAttribute(row.fabricName || "")}\nConfidence: ${Math.round((row.matchScore || 0) * 100)}%">${row.source?.sourceMaterialName ? `<span class="source-badge">Source: ${escapeHtml(row.source.sourceMaterialName)} · ${escapeHtml(row.source.sourceSheet || "")}</span>` : ""}${!isDbFabric && row.fabricName ? `<span class="not-in-db">Not in Fabric DB</span><button type="button" class="mini-button" data-add-fabric-db="${escapeAttribute(row.rowId)}">Fabric DB에 추가</button>` : ""}</td><td><input class="composition-edit-input" list="compositionAutocomplete" placeholder="Composition 선택 또는 생성" data-import-row-composition="${escapeAttribute(row.rowId)}" value="${escapeAttribute(compositionLabel)}"><button type="button" class="mini-button" data-compose-row="${escapeAttribute(row.rowId)}">${row.compositionDefinition?.source === "temporary" ? "CUSTOM" : "Composition 만들기"}</button></td><td class="number-cell"><input class="yy-input" type="number" min="0" step="0.0001" data-import-row-yy="${escapeAttribute(row.rowId)}" value="${row.yy || ""}"></td><td class="number-cell">${escapeHtml(row.confidence || "")}</td>${materials.map(() => "<td class=\"number-cell\">—</td>").join("")}<td><button type="button" class="mini-button danger" data-import-row-delete="${escapeAttribute(row.rowId)}">X</button></td>`;
     tr.querySelectorAll("input").forEach((input) => { input.addEventListener("focus", () => { inputHistoryBefore = workspaceSnapshot(); }); input.addEventListener("blur", finalizeInputHistory); });
     tr.querySelector("[data-import-row-fabric]").addEventListener("change", updateImportDraftRow);
     tr.querySelector("[data-import-row-composition]").addEventListener("change", updateImportDraftRow);
     tr.querySelector("[data-import-row-yy]").addEventListener("input", updateImportDraftRow);
     tr.querySelector("[data-import-row-delete]").addEventListener("click", () => deleteImportDraftRow(row.rowId));
+    tr.querySelector("[data-compose-row]").addEventListener("click", () => openCompositionBuilder({ kind: "draft", rowId: row.rowId }, getRowComposition(row) || { label: compositionLabel, components: {} }));
+    tr.querySelector("[data-add-fabric-db]")?.addEventListener("click", () => addImportedFabricToDb(row.rowId));
     els.fabricTableBody.append(tr);
   });
 }
@@ -714,11 +743,25 @@ function updateImportDraftRow(event) {
   const rowId = event.target.dataset.importRowFabric || event.target.dataset.importRowComposition || event.target.dataset.importRowYy; const row = activeDraft()?.rows.find((item) => item.rowId === rowId); if (!row) return;
   const tr = event.target.closest("tr"); const fabricValue = tr.querySelector("[data-import-row-fabric]").value.trim(); const compositionValue = tr.querySelector("[data-import-row-composition]").value.trim(); const yy = numericUsage(tr.querySelector("[data-import-row-yy]").value);
   const fabric = appState.fabrics.find((item) => fabricMatchingKey(item.name) === fabricMatchingKey(fabricValue));
-  row.fabricId = fabric?.id || null; row.fabricName = fabric?.name || fabricValue; row.compositionId = fabric?.compositionId || appState.compositions.find((item) => normalizeText(item.label) === normalizeText(compositionValue))?.id || null; row.composition = fabric ? getCompositionLabel(fabric.compositionId) : compositionValue; row.yy = yy;
+  const composition = appState.compositions.find((item) => normalizeText(item.label) === normalizeText(compositionValue));
+  row.fabricId = fabric?.id || null; row.fabricName = fabric?.name || fabricValue; row.compositionId = fabric?.compositionId || composition?.id || null; row.composition = fabric ? getCompositionLabel(fabric.compositionId) : compositionValue; row.compositionDefinition = fabric ? clone(getComposition(fabric.compositionId)) : composition ? clone(composition) : row.compositionDefinition?.label === compositionValue ? row.compositionDefinition : null; row.yy = yy;
   rebuildDraftYy(activeDraft());
   if (event.target.dataset.importRowYy) { refreshFabricCalculations(); return; }
   renderFabricTable();
 }
+function addImportedFabricToDb(rowId) { const row = activeDraft()?.rows.find((item) => item.rowId === rowId); const composition = getRowComposition(row); if (!row?.fabricName || !composition?.components) { showMessage("Fabric Name과 계산 가능한 Composition을 먼저 입력하세요.", "error"); return; } let compositionId = composition.id; if (!compositionId) { compositionId = uniqueId(slugify(composition.label), appState.compositions.map((item) => item.id)); appState.compositions.push({ id: compositionId, label: composition.label, components: clone(composition.components) }); } const fabric = { id: uniqueId("fabric_import", appState.fabrics.map((item) => item.id)), name: row.fabricName, compositionId, order: nextOrder(appState.fabrics) }; appState.fabrics.push(fabric); row.fabricId = fabric.id; row.compositionId = compositionId; row.compositionDefinition = clone(getComposition(compositionId)); saveStore(); rebuildDraftYy(activeDraft()); renderAll(); }
+
+function openCompositionBuilder(target, initial = {}) { compositionBuilderTarget = target; compositionBuilderState = { label: initial.label || "", rows: Object.entries(initial.components || {}).map(([materialId, ratio]) => ({ materialId, ratio })), nameEdited: Boolean(initial.label) }; if (!compositionBuilderState.rows.length) compositionBuilderState.rows.push({ materialId: getMaterials()[0]?.id || "", ratio: "" }); renderCompositionBuilder(); els.compositionBuilderModal.classList.remove("hidden"); }
+function closeCompositionBuilder() { compositionBuilderTarget = null; compositionBuilderState = null; els.compositionBuilderModal.classList.add("hidden"); }
+function materialLabelForComposition(material) { return String(material.name || "").replace(/\s*\(COATED\)|\s*\(UNCOATED\)/g, ""); }
+function suggestCompositionName(rows) { return rows.map((item) => { const material = appState.materials.find((m) => m.id === item.materialId); const ratio = Number(item.ratio); return material && Number.isFinite(ratio) && ratio > 0 ? `${materialLabelForComposition(material)}${ratio}%` : ""; }).filter(Boolean).join("+"); }
+function renderCompositionBuilder() { const state = compositionBuilderState; els.compositionBuilderName.value = state.label || suggestCompositionName(state.rows); els.compositionBuilderRows.innerHTML = state.rows.map((item, index) => `<tr><td><select data-builder-material="${index}"><option value="">Material 선택</option>${getMaterials().map((m) => `<option value="${escapeAttribute(m.id)}" ${m.id === item.materialId ? "selected" : ""}>${escapeHtml(m.name)}</option>`).join("")}</select></td><td><input type="number" min="0" step="0.01" data-builder-ratio="${index}" value="${item.ratio}"> %</td><td><button type="button" class="mini-button danger" data-builder-delete="${index}">X</button></td></tr>`).join(""); const total = state.rows.reduce((sum, item) => sum + (Number(item.ratio) || 0), 0); els.compositionBuilderTotal.textContent = `Total: ${formatNumber(total, 2)}%`; els.compositionBuilderTotal.className = total === 100 ? "ok-text" : "error-text"; els.compositionBuilderError.classList.toggle("hidden", total === 100); els.compositionBuilderRows.querySelectorAll("[data-builder-material]").forEach((input) => input.addEventListener("change", () => { state.rows[Number(input.dataset.builderMaterial)].materialId = input.value; state.label = ""; renderCompositionBuilder(); })); els.compositionBuilderRows.querySelectorAll("[data-builder-ratio]").forEach((input) => input.addEventListener("input", () => { state.rows[Number(input.dataset.builderRatio)].ratio = input.value; state.label = ""; renderCompositionBuilder(); })); els.compositionBuilderRows.querySelectorAll("[data-builder-delete]").forEach((button) => button.addEventListener("click", () => { state.rows.splice(Number(button.dataset.builderDelete), 1); renderCompositionBuilder(); })); els.compositionBuilderName.oninput = () => { state.label = els.compositionBuilderName.value; state.nameEdited = true; }; }
+function builtComposition() { const total = compositionBuilderState.rows.reduce((sum, item) => sum + (Number(item.ratio) || 0), 0); if (Math.abs(total - 100) > 1e-6) { els.compositionBuilderError.classList.remove("hidden"); return null; } const components = {}; compositionBuilderState.rows.forEach((item) => { if (item.materialId && Number(item.ratio) > 0) components[item.materialId] = Number(item.ratio); }); const label = els.compositionBuilderName.value.trim() || suggestCompositionName(compositionBuilderState.rows); return { label, components, source: "temporary" }; }
+function applyBuiltComposition(saveToDb) { const composition = builtComposition(); if (!composition) { showMessage("Composition total must equal 100%.", "error"); return; } if (saveToDb) { const existing = appState.compositions.find((item) => normalizeText(item.label) === normalizeText(composition.label)); if (existing) { composition.id = existing.id; composition.source = "db"; } else { composition.id = uniqueId(slugify(composition.label), appState.compositions.map((item) => item.id)); composition.source = "db"; appState.compositions.push({ id: composition.id, label: composition.label, components: clone(composition.components) }); saveStore(); } renderAutocompleteLists(); } applyCompositionToTarget(composition); closeCompositionBuilder(); }
+function applyCompositionToTarget(composition) { if (compositionBuilderTarget?.kind === "draft") { commitWorkspaceChange(() => { const row = activeDraft().rows.find((item) => item.rowId === compositionBuilderTarget.rowId); if (!row) return; row.compositionDefinition = clone(composition); row.compositionId = composition.id || null; row.composition = composition.label; rebuildDraftYy(activeDraft()); }); } else if (compositionBuilderTarget?.kind === "preview") { const row = pendingUpload?.files?.[compositionBuilderTarget.fileIndex]?.rows?.[compositionBuilderTarget.rowIndex]; if (row) { row.compositionDefinition = clone(composition); row.composition = composition.label; renderStyleUploadPreview(); } } }
+function openMaterialBuilder() { els.builderMaterialName.value = ""; els.builderMaterialInternalLabel.value = ""; els.builderMaterialUsLabel.value = ""; els.builderMaterialEuLabel.value = ""; els.materialBuilderModal.classList.remove("hidden"); }
+function closeMaterialBuilder() { els.materialBuilderModal.classList.add("hidden"); }
+function saveBuilderMaterial() { const name = els.builderMaterialName.value.trim(); if (!name) { showMessage("Material Name을 입력하세요.", "error"); return; } const id = uniqueId(slugify(name), appState.materials.map((m) => m.id)); appState.materials.push({ id, name, order: nextOrder(appState.materials) }); appState.careLabelMappings = normalizeCareLabelMappings(appState.careLabelMappings); const internal = els.builderMaterialInternalLabel.value.trim(); const us = els.builderMaterialUsLabel.value.trim(); const eu = els.builderMaterialEuLabel.value.trim(); if (internal) appState.careLabelMappings.internal[id].label = internal.toUpperCase(); if (us) appState.careLabelMappings.us[id].label = us.toUpperCase(); if (eu) appState.careLabelMappings.eu[id].label = eu.toUpperCase(); saveStore(); closeMaterialBuilder(); renderCompositionBuilder(); }
 function rebuildDraftYy(draft) { draft.yyByFabricId = {}; (draft.rows || []).forEach((row) => { if (row.fabricId && parseYy(row.yy) > 0) draft.yyByFabricId[row.fabricId] = (draft.yyByFabricId[row.fabricId] || 0) + parseYy(row.yy); }); currentYyByFabricId = { ...draft.yyByFabricId }; draft.dirty = true; }
 function addDraftFabricRow() { const draft = activeDraft(); if (!draft || draft.sourceType !== "import") return; commitWorkspaceChange(() => { draft.rows.push({ rowId: `row_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, fabricId: null, fabricName: "", compositionId: null, composition: "", yy: "", confidence: "", source: {} }); }); }
 function deleteImportDraftRow(rowId) { commitWorkspaceChange(() => { const draft = activeDraft(); draft.rows = draft.rows.filter((row) => row.rowId !== rowId); rebuildDraftYy(draft); }); }
@@ -751,6 +794,7 @@ function getCurrentStyle() {
   return {
     name: normalizeStyleName(els.styleNameInput.value),
     yyByFabricId: { ...currentYyByFabricId },
+    rows: activeDraft()?.sourceType === "import" ? clone(activeDraft().rows) : undefined,
   };
 }
 
@@ -825,7 +869,7 @@ function renderSavedStyles() {
 function loadStyle(name) {
   const style = appState.styles[name];
   if (!style) return;
-  newDraft(style, { dirty: false });
+  newDraft(style, { rows: style.rows || [], sourceType: Array.isArray(style.rows) ? "import" : "manual", dirty: false });
   els.styleNameInput.value = style.name;
   currentYyByFabricId = sanitizeYyMap(style.yyByFabricId);
   renderStyleDraftList();
@@ -1692,7 +1736,7 @@ function styleNameFromWorkbook(workbook, fileName) {
   for (const name of workbook.SheetNames) { const matrix = sheetMatrix(workbook.Sheets[name]); for (const row of matrix.slice(0, 8)) { const line = row.map(String).join(" "); const hit = line.match(/(?:스타일|STYLE)\s*[:：]?\s*([A-Z0-9 #_-]+(?:PANT|JERSEY|GLOVE)[A-Z0-9 #_-]*)/i) || line.match(/(?:FLY RACING\s*[- ]*)?(#?\s*\d+\s+EVO\s+(?:PANT|JERSEY|GLOVE))/i); if (hit) return cleanStyleName(hit[1]); } }
   return cleanStyleName(fileName.replace(/\.[^.]+$/, ""));
 }
-function cleanStyleName(value) { return String(value).replace(/FLY RACING/ig, "").replace(/#/g, " ").replace(/\b\d+차\b|소요량|\b\d{6,8}\b|\(\d+\s*=\s*XL\)|\(\d{1,2}\.\d{1,2}\)|\bL\d+\b/ig, " ").replace(/\s+/g, " ").trim().replace(/^[- ]+|[- ]+$/g, ""); }
+function cleanStyleName(value) { return String(value).replace(/FLY RACING/ig, "").replace(/#/g, " ").replace(/\d+차|소요량|\b\d{6,8}\b|\(\s*\d+\s*=\s*XL\s*\)|\(\s*\d+\s*\)|\(\s*\d{1,2}\.\d{1,2}\s*\)|\(\s*XL\s*\)|\bL\d+\b/ig, " ").replace(/\s+/g, " ").trim().replace(/^[- ]+|[- ]+$/g, ""); }
 function headerColumn(row, predicate) { return row.findIndex((cell) => predicate(normalizeText(cell))); }
 function makeRecord(material, usage, sizeGroup, sheet, row, col, parsedType) {
   const match = matchFabric(material);
@@ -1706,7 +1750,7 @@ function parsePant(matrix, sheetName) {
     const sizeText = row.map(normalizeText).join(" "); if (sizeText.includes("SIZE")) currentSize = sizeAt(matrix, r);
     if (materialCol < 0 || usageCol < 0) return;
     const material = String(row[materialCol] || "").trim(); const usage = numericUsage(row[usageCol]);
-    if (!material || !usage || /^(SIZE|디지털 프린트|\d+$)/i.test(material)) return;
+    if (!material || !usage || /^(SIZE|디지털 프린트|\d+$)/i.test(material) || /^\d+\s*(?:=>|→|=)\s*\d+/.test(material)) return;
     const match = matchFabric(material); if (!match.fabric && isAccessory(material)) return;
     records.push(makeRecord(material, usage, currentSize, sheetName, r, usageCol, "PANT"));
   }); return records;
@@ -1796,11 +1840,12 @@ function renderStyleUploadPreview() {
   const files = pendingUpload.files;
   showUploadPreview("소요량표 Import Preview", files.map((item, index) => `
     <section class="preview-file" data-preview-file="${index}"><div class="preview-meta"><div><b>Style Name</b><input data-style-name value="${escapeAttribute(item.styleName)}"></div><div><b>Detected Type</b><select data-file-type><option ${item.detectedType === "PANT" ? "selected" : ""}>PANT</option><option ${item.detectedType === "JERSEY" ? "selected" : ""}>JERSEY</option><option ${item.detectedType === "GLOVE" ? "selected" : ""}>GLOVE</option><option ${item.detectedType === "UNKNOWN" ? "selected" : ""}>UNKNOWN</option></select></div><div><b>Source File</b><br>${escapeHtml(item.file.name)}</div></div>
-    ${item.error ? `<p class="error-text">${escapeHtml(item.error)}</p>` : ""}<div class="table-wrap"><table class="data-table preview-table"><thead><tr><th>Source Material</th><th>Matched Fabric</th><th>Composition</th><th>Parsed YY</th><th>Confidence</th><th>Rule</th></tr></thead><tbody>${item.rows.map((row, rowIndex) => `<tr class="match-${row.confidence.toLowerCase()}"><td>${escapeHtml(row.material)}</td><td><input list="fabricAutocomplete" data-row-fabric="${rowIndex}" value="${escapeAttribute(row.matchedFabricName)}" title="Source: ${escapeAttribute(row.material)}&#10;Matched: ${escapeAttribute(row.matchedFabricName)}&#10;Confidence: ${Math.round(row.matchScore * 100)}%"></td><td><input list="compositionAutocomplete" data-row-composition="${rowIndex}" value="${escapeAttribute(row.composition)}"></td><td><input type="number" min="0" step="0.0001" data-row-usage="${rowIndex}" value="${row.usage}"></td><td>${escapeHtml(row.confidence)} ${Math.round(row.matchScore * 100)}%</td><td>${escapeHtml(row.rule)}</td></tr>`).join("")}</tbody></table></div></section>`).join(""));
+    ${item.error ? `<p class="error-text">${escapeHtml(item.error)}</p>` : ""}<div class="table-wrap"><table class="data-table preview-table"><thead><tr><th>Source Material</th><th>Matched Fabric</th><th>Composition</th><th>Parsed YY</th><th>Confidence</th><th>Rule</th></tr></thead><tbody>${item.rows.map((row, rowIndex) => `<tr class="match-${row.confidence.toLowerCase()}"><td>${escapeHtml(row.material)}</td><td><input list="fabricAutocomplete" data-row-fabric="${rowIndex}" value="${escapeAttribute(row.matchedFabricName)}" title="Source: ${escapeAttribute(row.material)}&#10;Matched: ${escapeAttribute(row.matchedFabricName)}&#10;Confidence: ${Math.round(row.matchScore * 100)}%"></td><td><input list="compositionAutocomplete" placeholder="Composition 선택 또는 생성" data-row-composition="${rowIndex}" value="${escapeAttribute(row.compositionDefinition?.label || row.composition)}"><button type="button" class="mini-button" data-preview-compose="${rowIndex}">${row.compositionDefinition?.source === "temporary" ? "CUSTOM" : "Composition 만들기"}</button></td><td><input type="number" min="0" step="0.0001" data-row-usage="${rowIndex}" value="${row.usage}"></td><td>${escapeHtml(row.confidence)} ${Math.round(row.matchScore * 100)}%</td><td>${escapeHtml(row.rule)}</td></tr>`).join("")}</tbody></table></div></section>`).join(""));
+  els.uploadPreviewBody.querySelectorAll("[data-preview-file]").forEach((section) => section.querySelectorAll("[data-preview-compose]").forEach((button) => button.addEventListener("click", () => { const fileIndex = Number(section.dataset.previewFile); const rowIndex = Number(button.dataset.previewCompose); const row = pendingUpload.files[fileIndex].rows[rowIndex]; openCompositionBuilder({ kind: "preview", fileIndex, rowIndex }, row.compositionDefinition || { label: row.composition, components: {} }); })));
   els.importUploadPreviewBtn.textContent = files.length > 1 ? "Import All" : "Import";
 }
 function readPreviewEdits() {
-  els.uploadPreviewBody.querySelectorAll("[data-preview-file]").forEach((section) => { const item = pendingUpload.files[Number(section.dataset.previewFile)]; item.styleName = section.querySelector("[data-style-name]").value.trim(); item.detectedType = section.querySelector("[data-file-type]").value; section.querySelectorAll("[data-row-fabric]").forEach((input) => { const row = item.rows[Number(input.dataset.rowFabric)]; const match = matchFabric(input.value); row.matchedFabricName = input.value.trim(); row.matchedFabricId = match.fabric?.id || null; row.composition = section.querySelector(`[data-row-composition="${input.dataset.rowFabric}"]`).value.trim(); row.usage = numericUsage(section.querySelector(`[data-row-usage="${input.dataset.rowFabric}"]`).value); row.confidence = match.confidence; }); });
+  els.uploadPreviewBody.querySelectorAll("[data-preview-file]").forEach((section) => { const item = pendingUpload.files[Number(section.dataset.previewFile)]; item.styleName = section.querySelector("[data-style-name]").value.trim(); item.detectedType = section.querySelector("[data-file-type]").value; section.querySelectorAll("[data-row-fabric]").forEach((input) => { const row = item.rows[Number(input.dataset.rowFabric)]; const match = matchFabric(input.value); const compositionLabel = section.querySelector(`[data-row-composition="${input.dataset.rowFabric}"]`).value.trim(); const dbComposition = appState.compositions.find((c) => normalizeText(c.label) === normalizeText(compositionLabel)); row.matchedFabricName = input.value.trim(); row.matchedFabricId = match.fabric?.id || null; row.composition = compositionLabel; row.compositionDefinition = dbComposition ? clone(dbComposition) : row.compositionDefinition?.label === compositionLabel ? row.compositionDefinition : null; row.usage = numericUsage(section.querySelector(`[data-row-usage="${input.dataset.rowFabric}"]`).value); row.confidence = match.confidence; }); });
 }
 function commitUploadPreview() {
   if (!pendingUpload) return; readPreviewEdits();
@@ -1813,7 +1858,7 @@ function commitUploadPreview() {
   closeUploadPreview(); activateDraft(activeStyleId); showMessage(`${importedCount}개 Style draft를 생성했습니다.`);
 }
 function createDraftFromImport(preview) {
-  const rows = preview.rows.map((row) => ({ rowId: `row_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, fabricId: row.matchedFabricId || null, fabricName: row.matchedFabricName || row.material, compositionId: row.matchedFabricId ? appState.fabrics.find((fabric) => fabric.id === row.matchedFabricId)?.compositionId || null : appState.compositions.find((composition) => normalizeText(composition.label) === normalizeText(row.composition))?.id || null, composition: row.composition || "", yy: numericUsage(row.usage), confidence: row.confidence, matchScore: row.matchScore, source: { sourceFileName: preview.file.name, sourceSheet: row.sourceSheet, sourceMaterialName: row.material, sourceUsage: row.sourceUsage, sizeGroup: row.sizeGroup, parsedType: preview.detectedType, matchScore: row.matchScore, matchType: row.matchType, matchedFabricId: row.matchedFabricId, sourceCell: row.sourceCell } }));
+  const rows = preview.rows.map((row) => { const dbComposition = row.matchedFabricId ? getComposition(appState.fabrics.find((fabric) => fabric.id === row.matchedFabricId)?.compositionId) : appState.compositions.find((composition) => normalizeText(composition.label) === normalizeText(row.composition)); const definition = row.compositionDefinition || dbComposition || null; return { rowId: `row_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, fabricId: row.matchedFabricId || null, fabricName: row.matchedFabricName || row.material, compositionId: definition?.id || null, composition: definition?.label || row.composition || "", compositionDefinition: definition ? clone(definition) : null, yy: numericUsage(row.usage), confidence: row.confidence, matchScore: row.matchScore, source: { sourceFileName: preview.file.name, sourceSheet: row.sourceSheet, sourceMaterialName: row.material, sourceUsage: row.sourceUsage, sizeGroup: row.sizeGroup, parsedType: preview.detectedType, matchScore: row.matchScore, matchType: row.matchType, matchedFabricId: row.matchedFabricId, sourceCell: row.sourceCell } }; });
   const yyByFabricId = {}; rows.forEach((row) => { if (row.fabricId && row.yy > 0) yyByFabricId[row.fabricId] = (yyByFabricId[row.fabricId] || 0) + row.yy; });
   return newDraft({ name: preview.styleName, yyByFabricId }, { rows, sourceType: "import", sourceFile: preview.file.name, parsedType: preview.detectedType, dirty: true });
 }
