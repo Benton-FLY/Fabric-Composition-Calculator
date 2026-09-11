@@ -273,12 +273,14 @@ select {
 .review-warning.hidden { display: none; }
 .review-required-row td { background: #fff1f1 !important; }
 .review-badge { display: inline-block; margin: 4px 6px 0 0; border-radius: 999px; background: #fbd5d1; color: #8a1c13; padding: 2px 7px; font-size: 10px; font-weight: 700; }
+.manual-badge { background: #dbeafe; color: #1d4ed8; }
 .draft-item.active { border-color: var(--accent); background: #eef8f4; color: var(--accent-dark); }
 .draft-item .draft-dirty { color: #a16207; }
 .match-high td { background: #f0fbf5 !important; }
 .match-medium td { background: #fff9dc !important; }
 .match-low td { background: #fff0df !important; }
 .match-unmatched td { background: #fff0f0 !important; }
+.row-manual td { background: #eef6ff !important; }
 /* Imported review state always wins over the confidence tint.  A row that was
    UNMATCHED in Preview must remain visibly unresolved until the user confirms
    a Fabric or Composition. */

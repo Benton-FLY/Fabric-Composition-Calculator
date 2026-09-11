@@ -24,7 +24,8 @@ if (calculation.totalYy !== 0 || calculation.unresolvedYy !== 0.0163 || calculat
 unresolved.compositionId = context.appState.compositions.find((item) => item.label === "POLYESTER100%")?.id;
 unresolved.compositionDefinition = context.clone(context.getComposition(unresolved.compositionId));
 unresolved.composition = unresolved.compositionDefinition.label;
-context.markRowReviewState(unresolved, true);
+context.markRowReviewState(unresolved, true, "MANUAL");
+if (unresolved.importStatus.resolutionType !== "MANUAL" || !unresolved.importStatus.resolvedByUser) throw new Error("TEST B: manual resolution metadata missing");
 calculation = context.calculateStyle({ name: preview.styleName, rows: [unresolved] });
 if (calculation.reviewCount !== 0 || calculation.totalYy !== 0.0163 || Math.abs(calculation.totals.polyester_uncoated - 1) > 1e-9) throw new Error("TEST B: reviewed row did not enter calculation");
 
