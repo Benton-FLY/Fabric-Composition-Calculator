@@ -58,6 +58,7 @@
 
         <div class="content-grid">
           <section class="fabric-section">
+            <div id="reviewWarningArea" class="review-warning hidden"><span id="reviewWarningText"></span><button type="button" id="toggleReviewFilterBtn">검토 필요 항목만 보기</button></div>
             <div class="import-row-actions"><button type="button" id="addDraftFabricRowBtn">+ 원단 추가</button></div>
             <div class="table-wrap">
               <table id="fabricTable" class="data-table">
@@ -69,6 +70,7 @@
 
           <aside class="summary-panel">
             <h2>최종 혼용률</h2>
+            <div id="summaryReviewWarning" class="review-warning hidden"></div>
             <div class="summary-meta">
               <div>
                 <span>Current Style</span>

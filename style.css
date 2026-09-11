@@ -268,6 +268,11 @@ select {
 .draft-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .draft-delete { min-height: 25px; padding: 2px 7px; color: var(--danger); }
 .draft-source { display: block; color: var(--muted); font-size: 10px; font-weight: 400; }
+.review-count { color: #b42318; }
+.review-warning { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; border: 1px solid #efb4ad; border-radius: 7px; background: #fff1f1; color: #8a1c13; padding: 9px 11px; font-weight: 700; }
+.review-warning.hidden { display: none; }
+.review-required-row td { background: #fff1f1 !important; }
+.review-badge { display: inline-block; margin: 4px 6px 0 0; border-radius: 999px; background: #fbd5d1; color: #8a1c13; padding: 2px 7px; font-size: 10px; font-weight: 700; }
 .draft-item.active { border-color: var(--accent); background: #eef8f4; color: var(--accent-dark); }
 .draft-item .draft-dirty { color: #a16207; }
 .match-high td { background: #f0fbf5 !important; }
