@@ -28,3 +28,10 @@ assert.equal(imported.totals.polyurethane, 0.08);
 assert.equal(context.polyesterRatio({ components: { polyurethane: 100 } }), 0);
 assert.equal(context.polyesterRatio({ components: { nylon: 100 } }), 0);
 console.log('Polyester coating calculation and persistence tests passed');
+// Editing YY must preserve the original composition behind its displayed override.
+const customRow = { compositionDefinition: { label: 'Custom blend (COATED)', components: { polyester_coated: 80, nylon: 20 } }, polyesterCoating: 'uncoated' };
+const display = context.applyPolyesterCoating(context.getRowComposition(customRow), customRow.polyesterCoating);
+assert.equal(display.label, 'Custom blend (UNCOATED)');
+assert.equal(context.getEditedRowCompositionLabel(customRow, display.label), 'Custom blend (COATED)');
+assert.equal(context.getEditedRowCompositionLabel(customRow, 'NYLON100%'), 'NYLON100%');
+assert.equal(context.applyPolyesterCoating(display, 'coated').label, 'Custom blend (COATED)');

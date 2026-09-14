@@ -519,6 +519,13 @@ function applyPolyesterCoating(composition, coating) {
   return { ...composition, label: `${label} (${coating.toUpperCase()})`, components };
 }
 
+// The displayed coating suffix is an override, not a different DB composition.
+function getEditedRowCompositionLabel(row, value) {
+  const original = getRowComposition(row);
+  const displayed = applyPolyesterCoating(original, row.polyesterCoating);
+  return displayed && value === displayed.label ? original.label : value;
+}
+
 function appendCoatingControl(cell, composition, coating, key, onChange) {
   if (!polyesterRatio(composition)) return;
   const selected = ["coated", "uncoated"].includes(coating) ? coating
@@ -729,7 +736,7 @@ function renderFabricTable() {
       tr.innerHTML = `
         <td>${index + 1}</td>
         <td><input class="fabric-edit-input" list="fabricAutocomplete" data-fabric-edit="${escapeAttribute(fabric.id)}" value="${escapeAttribute(fabric.name)}"></td>
-        <td><input class="composition-edit-input" list="compositionAutocomplete" data-composition-edit="${escapeAttribute(fabric.id)}" value="${escapeAttribute(getCompositionLabel(fabric.compositionId))}"></td>
+        <td><input class="composition-edit-input" list="compositionAutocomplete" data-composition-edit="${escapeAttribute(fabric.id)}" value="${escapeAttribute(applyPolyesterCoating(getComposition(fabric.compositionId), activeDraft()?.coatingByFabricId?.[fabric.id])?.label || "")}"></td>
         <td class="number-cell"></td>
         <td class="number-cell calc-ratio">0.000%</td>
         ${materials.map((material) => `<td class="number-cell calc-material" data-material-id="${escapeAttribute(material.id)}">0.000%</td>`).join("")}
@@ -778,7 +785,7 @@ function renderImportedFabricTable(materials) {
     const status = getImportRowStatus(row);
     const tr = document.createElement("tr"); tr.className = status.className;
     const isDbFabric = Boolean(row.fabricId);
-    const compositionLabel = getRowComposition(row)?.label || row.composition || "";
+    const compositionLabel = applyPolyesterCoating(getRowComposition(row), row.polyesterCoating)?.label || row.composition || "";
     tr.innerHTML = `<td>${index + 1}</td><td><input class="fabric-edit-input" list="fabricAutocomplete" data-import-row-fabric="${escapeAttribute(row.rowId)}" value="${escapeAttribute(row.fabricName || "")}" title="Source: ${escapeAttribute(row.source?.sourceMaterialName || "")}\nMatched: ${escapeAttribute(row.fabricName || "")}\nConfidence: ${Math.round((row.matchScore || 0) * 100)}%">${row.source?.sourceMaterialName ? `<span class="source-badge">Source: ${escapeHtml(row.source.sourceMaterialName)} · ${escapeHtml(row.source.sourceSheet || "")}</span>` : ""}${status.badge ? `<span class="review-badge ${status.badgeClass}">${status.badge}</span>` : ""}${!isDbFabric && row.fabricName ? `<span class="not-in-db">Not in Fabric DB</span><button type="button" class="mini-button" data-add-fabric-db="${escapeAttribute(row.rowId)}">Fabric DB에 추가</button>` : ""}</td><td><input class="composition-edit-input" list="compositionAutocomplete" placeholder="Composition 선택 또는 생성" data-import-row-composition="${escapeAttribute(row.rowId)}" value="${escapeAttribute(compositionLabel)}"><button type="button" class="mini-button" data-compose-row="${escapeAttribute(row.rowId)}">${row.compositionDefinition?.source === "temporary" ? "CUSTOM" : "Composition 만들기"}</button></td><td class="number-cell"><input class="yy-input" type="number" min="0" step="0.0001" data-import-row-yy="${escapeAttribute(row.rowId)}" value="${formatYY(row.yy)}"></td><td class="number-cell">${escapeHtml(status.label)}</td>${materials.map(() => "<td class=\"number-cell\">—</td>").join("")}<td><button type="button" class="mini-button danger" data-import-row-delete="${escapeAttribute(row.rowId)}">X</button></td>`;
     appendCoatingControl(tr.children[2], getRowComposition(row), row.polyesterCoating, row.rowId, (value) => {
       commitWorkspaceChange(() => { row.polyesterCoating = value; draft.dirty = true; });
@@ -796,7 +803,7 @@ function renderImportedFabricTable(materials) {
 function finalizeInputHistory() { if (!inputHistoryBefore) return; const before = JSON.stringify(inputHistoryBefore); const after = JSON.stringify(workspaceSnapshot()); if (before !== after) { undoStack.push(inputHistoryBefore); redoStack = []; updateHistoryButtons(); } inputHistoryBefore = null; }
 function updateImportDraftRow(event) {
   const rowId = event.target.dataset.importRowFabric || event.target.dataset.importRowComposition || event.target.dataset.importRowYy; const row = activeDraft()?.rows.find((item) => item.rowId === rowId); if (!row) return;
-  const tr = event.target.closest("tr"); const fabricValue = tr.querySelector("[data-import-row-fabric]").value.trim(); const compositionValue = tr.querySelector("[data-import-row-composition]").value.trim(); const yy = numericUsage(tr.querySelector("[data-import-row-yy]").value);
+  const tr = event.target.closest("tr"); const fabricValue = tr.querySelector("[data-import-row-fabric]").value.trim(); const compositionValue = getEditedRowCompositionLabel(row, tr.querySelector("[data-import-row-composition]").value.trim()); const yy = numericUsage(tr.querySelector("[data-import-row-yy]").value);
   const fabric = appState.fabrics.find((item) => fabricMatchingKey(item.name) === fabricMatchingKey(fabricValue));
   const composition = appState.compositions.find((item) => normalizeText(item.label) === normalizeText(compositionValue));
   row.fabricId = fabric?.id || null; row.fabricName = fabric?.name || fabricValue; row.compositionId = fabric?.compositionId || composition?.id || null; row.composition = fabric ? getCompositionLabel(fabric.compositionId) : compositionValue; row.compositionDefinition = fabric ? clone(getComposition(fabric.compositionId)) : composition ? clone(composition) : row.compositionDefinition?.label === compositionValue ? row.compositionDefinition : null; row.yy = yy;
