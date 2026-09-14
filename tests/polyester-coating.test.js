@@ -35,3 +35,32 @@ assert.equal(display.label, 'Custom blend (UNCOATED)');
 assert.equal(context.getEditedRowCompositionLabel(customRow, display.label), 'Custom blend (COATED)');
 assert.equal(context.getEditedRowCompositionLabel(customRow, 'NYLON100%'), 'NYLON100%');
 assert.equal(context.applyPolyesterCoating(display, 'coated').label, 'Custom blend (COATED)');
+// A dropdown selection in normal mode updates this style, including saved results.
+context.commitWorkspaceChange = (action) => action();
+const manualDraft = context.newDraft(style);
+const nylon = context.appState.compositions.find(c => c.components.nylon === 100);
+context.handleDraftCompositionEdit({ target: { dataset: { compositionEdit: fabric.id }, value: nylon.label } });
+assert.equal(manualDraft.compositionByFabricId[fabric.id], nylon.id);
+assert.equal(manualDraft.coatingByFabricId[fabric.id], undefined);
+const changed = context.cloneStyle({ name: 'Changed', yyByFabricId: manualDraft.yyByFabricId, compositionByFabricId: manualDraft.compositionByFabricId });
+assert.equal(context.calculateStyle(changed).totals.nylon, 1);
+assert.equal(JSON.stringify(context.getComposition(fabric.compositionId)), original);
+assert.equal(context.newDraft(changed).compositionByFabricId[fabric.id], nylon.id);
+
+// An imported DB fabric must honor a new composition and retain it when YY changes.
+const importRow = { rowId: 'dropdown-row', fabricId: fabric.id, fabricName: fabric.name, compositionId: fabric.compositionId, yy: 1, polyesterCoating: 'coated' };
+context.newDraft({ name: 'Import' }, { sourceType: 'import', rows: [importRow] });
+context.renderFabricTable = () => {};
+context.refreshFabricCalculations = () => {};
+const fields = {
+  '[data-import-row-fabric]': { value: fabric.name },
+  '[data-import-row-composition]': { value: nylon.label },
+  '[data-import-row-yy]': { value: '1' },
+};
+context.updateImportDraftRow({ target: { dataset: { importRowComposition: importRow.rowId }, closest: () => ({ querySelector: key => fields[key] }) } });
+assert.equal(importRow.compositionId, nylon.id);
+assert.equal(importRow.polyesterCoating, undefined);
+context.updateImportDraftRow({ target: { dataset: { importRowYy: importRow.rowId }, value: '2' } });
+assert.equal(importRow.compositionId, nylon.id);
+assert.equal(importRow.yy, 2);
+assert.equal(context.calculateStyle({ name: 'Import', rows: [importRow] }).totals.nylon, 1);

@@ -374,7 +374,7 @@ function cloneStyle(style) {
   return {
     name: normalizeStyleName(style.name),
     yyByFabricId: sanitizeYyMap(style.yyByFabricId, true),
-    coatingByFabricId: clone(style.coatingByFabricId || {}),
+    coatingByFabricId: clone(style.coatingByFabricId || {}), compositionByFabricId: clone(style.compositionByFabricId || {}),
     rows: Array.isArray(style.rows) ? clone(style.rows) : undefined,
   };
 }
@@ -398,7 +398,7 @@ function parseYy(value) {
 
 function newDraft(style = { name: "", yyByFabricId: {} }, extras = {}) {
   const id = `draft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  styleDrafts[id] = { id, styleName: normalizeStyleName(style.name), coatingByFabricId: clone(style.coatingByFabricId || {}), yyByFabricId: { ...(style.yyByFabricId || {}) }, rows: extras.rows || [], sourceFile: extras.sourceFile || "", sourceType: extras.sourceType || "manual", dirty: Boolean(extras.dirty), ...extras };
+  styleDrafts[id] = { id, styleName: normalizeStyleName(style.name), coatingByFabricId: clone(style.coatingByFabricId || {}), compositionByFabricId: clone(style.compositionByFabricId || {}), yyByFabricId: { ...(style.yyByFabricId || {}) }, rows: extras.rows || [], sourceFile: extras.sourceFile || "", sourceType: extras.sourceType || "manual", dirty: Boolean(extras.dirty), ...extras };
   activeStyleId = id;
   return styleDrafts[id];
 }
@@ -455,11 +455,11 @@ function calculateStyle(style) {
     .map((fabric) => ({
       ...fabric,
       fabricName: fabric.name,
-      compositionLabel: applyPolyesterCoating(getComposition(fabric.compositionId), style.coatingByFabricId?.[fabric.id])?.label || "",
+      compositionLabel: applyPolyesterCoating(getStyleFabricComposition(style, fabric), style.coatingByFabricId?.[fabric.id])?.label || "",
       yy: parseYy(style.yyByFabricId?.[fabric.id]),
       ratio: 0,
       materialValues: emptyMaterialMap(),
-      composition: applyPolyesterCoating(getComposition(fabric.compositionId), style.coatingByFabricId?.[fabric.id]),
+      composition: applyPolyesterCoating(getStyleFabricComposition(style, fabric), style.coatingByFabricId?.[fabric.id]),
     }));
   const unresolvedRows = rows.filter((row) => row.yy > 0 && (rowNeedsReview(row.sourceRow) || !row.composition?.components));
   const usedRows = rows.filter((row) => row.yy > 0 && !rowNeedsReview(row.sourceRow) && row.composition?.components);
@@ -507,6 +507,10 @@ function getRowComposition(row) {
 }
 
 // Coating is a style-row override; shared Composition DB entries stay reusable.
+function getStyleFabricComposition(style, fabric) {
+  return getComposition(style?.compositionByFabricId?.[fabric.id] || fabric.compositionId);
+}
+
 function polyesterRatio(composition) {
   return Number(composition?.components?.polyester_coated || 0) + Number(composition?.components?.polyester_uncoated || 0);
 }
@@ -736,7 +740,7 @@ function renderFabricTable() {
       tr.innerHTML = `
         <td>${index + 1}</td>
         <td><input class="fabric-edit-input" list="fabricAutocomplete" data-fabric-edit="${escapeAttribute(fabric.id)}" value="${escapeAttribute(fabric.name)}"></td>
-        <td><input class="composition-edit-input" list="compositionAutocomplete" data-composition-edit="${escapeAttribute(fabric.id)}" value="${escapeAttribute(applyPolyesterCoating(getComposition(fabric.compositionId), activeDraft()?.coatingByFabricId?.[fabric.id])?.label || "")}"></td>
+        <td><input class="composition-edit-input" list="compositionAutocomplete" data-composition-edit="${escapeAttribute(fabric.id)}" value="${escapeAttribute(applyPolyesterCoating(getStyleFabricComposition(activeDraft(), fabric), activeDraft()?.coatingByFabricId?.[fabric.id])?.label || "")}"></td>
         <td class="number-cell"></td>
         <td class="number-cell calc-ratio">0.000%</td>
         ${materials.map((material) => `<td class="number-cell calc-material" data-material-id="${escapeAttribute(material.id)}">0.000%</td>`).join("")}
@@ -751,7 +755,7 @@ function renderFabricTable() {
       input.dataset.fabricId = fabric.id;
       input.addEventListener("input", handleYyInput);
       tr.children[3].append(input);
-      appendCoatingControl(tr.children[2], getComposition(fabric.compositionId), activeDraft()?.coatingByFabricId?.[fabric.id], fabric.id, (value) => {
+      appendCoatingControl(tr.children[2], getStyleFabricComposition(activeDraft(), fabric), activeDraft()?.coatingByFabricId?.[fabric.id], fabric.id, (value) => {
         commitWorkspaceChange(() => { const draft = activeDraft(); draft.coatingByFabricId ||= {}; draft.coatingByFabricId[fabric.id] = value; draft.dirty = true; });
       });
       tr.querySelector("[data-fabric-edit]").addEventListener("change", handleDraftFabricEdit);
@@ -803,10 +807,18 @@ function renderImportedFabricTable(materials) {
 function finalizeInputHistory() { if (!inputHistoryBefore) return; const before = JSON.stringify(inputHistoryBefore); const after = JSON.stringify(workspaceSnapshot()); if (before !== after) { undoStack.push(inputHistoryBefore); redoStack = []; updateHistoryButtons(); } inputHistoryBefore = null; }
 function updateImportDraftRow(event) {
   const rowId = event.target.dataset.importRowFabric || event.target.dataset.importRowComposition || event.target.dataset.importRowYy; const row = activeDraft()?.rows.find((item) => item.rowId === rowId); if (!row) return;
+  if (event.target.dataset.importRowYy) {
+    row.yy = numericUsage(event.target.value);
+    rebuildDraftYy(activeDraft());
+    refreshFabricCalculations();
+    return;
+  }
   const tr = event.target.closest("tr"); const fabricValue = tr.querySelector("[data-import-row-fabric]").value.trim(); const compositionValue = getEditedRowCompositionLabel(row, tr.querySelector("[data-import-row-composition]").value.trim()); const yy = numericUsage(tr.querySelector("[data-import-row-yy]").value);
   const fabric = appState.fabrics.find((item) => fabricMatchingKey(item.name) === fabricMatchingKey(fabricValue));
   const composition = appState.compositions.find((item) => normalizeText(item.label) === normalizeText(compositionValue));
-  row.fabricId = fabric?.id || null; row.fabricName = fabric?.name || fabricValue; row.compositionId = fabric?.compositionId || composition?.id || null; row.composition = fabric ? getCompositionLabel(fabric.compositionId) : compositionValue; row.compositionDefinition = fabric ? clone(getComposition(fabric.compositionId)) : composition ? clone(composition) : row.compositionDefinition?.label === compositionValue ? row.compositionDefinition : null; row.yy = yy;
+  const compositionChanged = Boolean(event.target.dataset.importRowComposition);
+  const definition = compositionChanged ? composition || (row.compositionDefinition?.label === compositionValue ? row.compositionDefinition : null) : fabric ? getComposition(fabric.compositionId) : composition;
+  row.fabricId = fabric?.id || null; row.fabricName = fabric?.name || fabricValue; row.compositionId = definition?.id || null; row.composition = definition?.label || compositionValue; row.compositionDefinition = definition ? clone(definition) : null; delete row.polyesterCoating; row.yy = yy;
   const resolved = Boolean(getRowComposition(row)?.components);
   markRowReviewState(row, resolved, resolved ? "MANUAL" : null);
   if (resolved && composition?.id) autoRegisterFabricFromManualReview(row);
@@ -881,6 +893,7 @@ function getCurrentStyle() {
     name: normalizeStyleName(els.styleNameInput.value),
     yyByFabricId: { ...currentYyByFabricId },
     coatingByFabricId: clone(activeDraft()?.coatingByFabricId || {}),
+    compositionByFabricId: clone(activeDraft()?.compositionByFabricId || {}),
     rows: activeDraft()?.sourceType === "import" ? clone(activeDraft().rows) : undefined,
   };
 }
@@ -1925,9 +1938,16 @@ function handleDraftFabricEdit(event) {
   syncActiveDraft(); renderFabricTable();
 }
 function handleDraftCompositionEdit(event) {
-  const fabric = appState.fabrics.find((f) => f.id === event.target.dataset.compositionEdit); const composition = appState.compositions.find((c) => normalizeText(c.label) === normalizeText(event.target.value));
-  if (fabric && composition && dbEditMode) fabric.compositionId = composition.id;
-  renderFabricTable();
+  const fabric = appState.fabrics.find((f) => f.id === event.target.dataset.compositionEdit);
+  const composition = appState.compositions.find((c) => normalizeText(c.label) === normalizeText(event.target.value));
+  if (!fabric || !composition) return;
+  commitWorkspaceChange(() => {
+    const draft = activeDraft();
+    draft.compositionByFabricId ||= {};
+    draft.compositionByFabricId[fabric.id] = composition.id;
+    delete draft.coatingByFabricId?.[fabric.id];
+    draft.dirty = true;
+  });
 }
 function updateImportedDraftRow(event) {
   const index = Number(event.target.dataset.importedFabric ?? event.target.dataset.importedComposition ?? event.target.dataset.importedYy); const row = (activeDraft()?.rows || []).filter((item) => !item.matchedFabricId)[index]; if (!row) return;

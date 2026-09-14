@@ -405,7 +405,7 @@ select {
 
 #fabricTable th:nth-child(3),
 #fabricTable td:nth-child(3) {
-  min-width: 230px;
+  min-width: 420px;
 }
 
 .number-cell {
@@ -909,4 +909,10 @@ select {
   width: auto;
   margin: 0;
   accent-color: var(--primary, #2563eb);
+}
+
+#fabricTable .composition-edit-input {
+  width: 100%;
+  min-width: 400px;
+  box-sizing: border-box;
 }
