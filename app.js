@@ -374,6 +374,7 @@ function cloneStyle(style) {
   return {
     name: normalizeStyleName(style.name),
     yyByFabricId: sanitizeYyMap(style.yyByFabricId, true),
+    coatingByFabricId: clone(style.coatingByFabricId || {}),
     rows: Array.isArray(style.rows) ? clone(style.rows) : undefined,
   };
 }
@@ -397,7 +398,7 @@ function parseYy(value) {
 
 function newDraft(style = { name: "", yyByFabricId: {} }, extras = {}) {
   const id = `draft_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  styleDrafts[id] = { id, styleName: normalizeStyleName(style.name), yyByFabricId: { ...(style.yyByFabricId || {}) }, rows: extras.rows || [], sourceFile: extras.sourceFile || "", sourceType: extras.sourceType || "manual", dirty: Boolean(extras.dirty), ...extras };
+  styleDrafts[id] = { id, styleName: normalizeStyleName(style.name), coatingByFabricId: clone(style.coatingByFabricId || {}), yyByFabricId: { ...(style.yyByFabricId || {}) }, rows: extras.rows || [], sourceFile: extras.sourceFile || "", sourceType: extras.sourceType || "manual", dirty: Boolean(extras.dirty), ...extras };
   activeStyleId = id;
   return styleDrafts[id];
 }
@@ -446,19 +447,19 @@ function calculateStyle(style) {
   const rows = Array.isArray(style.rows) ? style.rows.map((row, index) => ({
     id: row.rowId || row.fabricId || `custom_${index}`,
     fabricName: row.fabricName || "(Unnamed Fabric)",
-    compositionLabel: getRowComposition(row)?.label || row.composition || "",
-    yy: parseYy(row.yy), ratio: 0, materialValues: emptyMaterialMap(), composition: getRowComposition(row), sourceRow: row,
+    compositionLabel: applyPolyesterCoating(getRowComposition(row), row.polyesterCoating)?.label || row.composition || "",
+    yy: parseYy(row.yy), ratio: 0, materialValues: emptyMaterialMap(), composition: applyPolyesterCoating(getRowComposition(row), row.polyesterCoating), sourceRow: row,
   })) : appState.fabrics
     .slice()
     .sort((a, b) => Number(a.order) - Number(b.order))
     .map((fabric) => ({
       ...fabric,
       fabricName: fabric.name,
-      compositionLabel: getCompositionLabel(fabric.compositionId),
+      compositionLabel: applyPolyesterCoating(getComposition(fabric.compositionId), style.coatingByFabricId?.[fabric.id])?.label || "",
       yy: parseYy(style.yyByFabricId?.[fabric.id]),
       ratio: 0,
       materialValues: emptyMaterialMap(),
-      composition: getComposition(fabric.compositionId),
+      composition: applyPolyesterCoating(getComposition(fabric.compositionId), style.coatingByFabricId?.[fabric.id]),
     }));
   const unresolvedRows = rows.filter((row) => row.yy > 0 && (rowNeedsReview(row.sourceRow) || !row.composition?.components));
   const usedRows = rows.filter((row) => row.yy > 0 && !rowNeedsReview(row.sourceRow) && row.composition?.components);
@@ -503,6 +504,33 @@ function getRowComposition(row) {
   if (row?.composition && typeof row.composition === "object" && row.composition.components) return row.composition;
   if (row?.compositionId) return getComposition(row.compositionId);
   return null;
+}
+
+// Coating is a style-row override; shared Composition DB entries stay reusable.
+function polyesterRatio(composition) {
+  return Number(composition?.components?.polyester_coated || 0) + Number(composition?.components?.polyester_uncoated || 0);
+}
+
+function applyPolyesterCoating(composition, coating) {
+  if (!polyesterRatio(composition) || !["coated", "uncoated"].includes(coating)) return composition;
+  const components = { ...composition.components, polyester_coated: 0, polyester_uncoated: 0 };
+  components[`polyester_${coating}`] = polyesterRatio(composition);
+  const label = String(composition.label || "").replace(/\s*\((?:UNCOATED|COATED)\)/gi, "");
+  return { ...composition, label: `${label} (${coating.toUpperCase()})`, components };
+}
+
+function appendCoatingControl(cell, composition, coating, key, onChange) {
+  if (!polyesterRatio(composition)) return;
+  const selected = ["coated", "uncoated"].includes(coating) ? coating
+    : Number(composition.components.polyester_coated || 0) > 0 && !Number(composition.components.polyester_uncoated || 0) ? "coated"
+    : Number(composition.components.polyester_uncoated || 0) > 0 && !Number(composition.components.polyester_coated || 0) ? "uncoated" : "";
+  const group = document.createElement("span");
+  group.className = "coating-options";
+  group.setAttribute("role", "group");
+  group.setAttribute("aria-label", "Polyester coating");
+  group.innerHTML = ["coated", "uncoated"].map((value) => `<label><input type="radio" name="coating-${escapeAttribute(key)}" value="${value}" ${selected === value ? "checked" : ""}>${value === "coated" ? "Coated" : "Uncoated"}</label>`).join("");
+  group.querySelectorAll("input").forEach((input) => input.addEventListener("change", () => onChange(input.value)));
+  cell.append(group);
 }
 
 function emptyMaterialMap() {
@@ -716,6 +744,9 @@ function renderFabricTable() {
       input.dataset.fabricId = fabric.id;
       input.addEventListener("input", handleYyInput);
       tr.children[3].append(input);
+      appendCoatingControl(tr.children[2], getComposition(fabric.compositionId), activeDraft()?.coatingByFabricId?.[fabric.id], fabric.id, (value) => {
+        commitWorkspaceChange(() => { const draft = activeDraft(); draft.coatingByFabricId ||= {}; draft.coatingByFabricId[fabric.id] = value; draft.dirty = true; });
+      });
       tr.querySelector("[data-fabric-edit]").addEventListener("change", handleDraftFabricEdit);
       tr.querySelector("[data-composition-edit]").addEventListener("change", handleDraftCompositionEdit);
       els.fabricTableBody.append(tr);
@@ -749,7 +780,10 @@ function renderImportedFabricTable(materials) {
     const isDbFabric = Boolean(row.fabricId);
     const compositionLabel = getRowComposition(row)?.label || row.composition || "";
     tr.innerHTML = `<td>${index + 1}</td><td><input class="fabric-edit-input" list="fabricAutocomplete" data-import-row-fabric="${escapeAttribute(row.rowId)}" value="${escapeAttribute(row.fabricName || "")}" title="Source: ${escapeAttribute(row.source?.sourceMaterialName || "")}\nMatched: ${escapeAttribute(row.fabricName || "")}\nConfidence: ${Math.round((row.matchScore || 0) * 100)}%">${row.source?.sourceMaterialName ? `<span class="source-badge">Source: ${escapeHtml(row.source.sourceMaterialName)} · ${escapeHtml(row.source.sourceSheet || "")}</span>` : ""}${status.badge ? `<span class="review-badge ${status.badgeClass}">${status.badge}</span>` : ""}${!isDbFabric && row.fabricName ? `<span class="not-in-db">Not in Fabric DB</span><button type="button" class="mini-button" data-add-fabric-db="${escapeAttribute(row.rowId)}">Fabric DB에 추가</button>` : ""}</td><td><input class="composition-edit-input" list="compositionAutocomplete" placeholder="Composition 선택 또는 생성" data-import-row-composition="${escapeAttribute(row.rowId)}" value="${escapeAttribute(compositionLabel)}"><button type="button" class="mini-button" data-compose-row="${escapeAttribute(row.rowId)}">${row.compositionDefinition?.source === "temporary" ? "CUSTOM" : "Composition 만들기"}</button></td><td class="number-cell"><input class="yy-input" type="number" min="0" step="0.0001" data-import-row-yy="${escapeAttribute(row.rowId)}" value="${formatYY(row.yy)}"></td><td class="number-cell">${escapeHtml(status.label)}</td>${materials.map(() => "<td class=\"number-cell\">—</td>").join("")}<td><button type="button" class="mini-button danger" data-import-row-delete="${escapeAttribute(row.rowId)}">X</button></td>`;
-    tr.querySelectorAll("input").forEach((input) => { input.addEventListener("focus", () => { inputHistoryBefore = workspaceSnapshot(); }); input.addEventListener("blur", finalizeInputHistory); });
+    appendCoatingControl(tr.children[2], getRowComposition(row), row.polyesterCoating, row.rowId, (value) => {
+      commitWorkspaceChange(() => { row.polyesterCoating = value; draft.dirty = true; });
+    });
+    tr.querySelectorAll("input:not([type=radio])").forEach((input) => { input.addEventListener("focus", () => { inputHistoryBefore = workspaceSnapshot(); }); input.addEventListener("blur", finalizeInputHistory); });
     tr.querySelector("[data-import-row-fabric]").addEventListener("change", updateImportDraftRow);
     tr.querySelector("[data-import-row-composition]").addEventListener("change", updateImportDraftRow);
     tr.querySelector("[data-import-row-yy]").addEventListener("input", updateImportDraftRow);
@@ -839,6 +873,7 @@ function getCurrentStyle() {
   return {
     name: normalizeStyleName(els.styleNameInput.value),
     yyByFabricId: { ...currentYyByFabricId },
+    coatingByFabricId: clone(activeDraft()?.coatingByFabricId || {}),
     rows: activeDraft()?.sourceType === "import" ? clone(activeDraft().rows) : undefined,
   };
 }

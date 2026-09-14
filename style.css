@@ -891,3 +891,22 @@ select {
     position: static;
   }
 }
+
+.coating-options {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  white-space: nowrap;
+}
+.coating-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.coating-options input[type="radio"] {
+  width: auto;
+  margin: 0;
+  accent-color: var(--primary, #2563eb);
+}
