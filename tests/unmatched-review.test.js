@@ -21,7 +21,7 @@ if (untouched.confidence !== "UNMATCHED" || untouched.matchedFabricId !== null |
 let calculation = context.calculateStyle({ name: preview.styleName, rows: [unresolved] });
 if (calculation.totalYy !== 0 || calculation.unresolvedYy !== 0.0163 || calculation.reviewCount !== 1) throw new Error("TEST A: unresolved row entered calculation");
 
-unresolved.compositionId = context.appState.compositions.find((item) => item.label === "POLYESTER100%")?.id;
+unresolved.compositionId = context.appState.compositions.find((item) => item.label === "POLYESTER100%" && item.components.polyester_uncoated === 100)?.id;
 unresolved.compositionDefinition = context.clone(context.getComposition(unresolved.compositionId));
 unresolved.composition = unresolved.compositionDefinition.label;
 context.markRowReviewState(unresolved, true, "MANUAL");

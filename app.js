@@ -68,7 +68,7 @@ const DEFAULT_COMPOSITIONS = [
   { label: "NYLON78%+KEVLAR14%+SPANDEX8%", components: { nylon: 78, kevlar: 14, spandex: 8 } },
   { label: "POLYESTER100%", components: { polyester_uncoated: 100 } },
   { label: "NYLON100%", components: { nylon: 100 } },
-].map((item) => ({ id: slugify(item.label), ...item }));
+].map((item) => ({ id: slugify(item.label), ...item, label: stripCoatingName(item.label) }));
 
 const DEFAULT_FABRICS_SOURCE = [
   ["600 POLY (78T) -600MM CHINA WR C0 (WRC0)", "POLYESTER100% (COATED)"],
@@ -245,6 +245,7 @@ function loadStore() {
       return migrated;
     }
     normalizeV3Store(parsed);
+    saveStore(parsed);
     return parsed;
   } catch {
     return fallback;
@@ -266,11 +267,10 @@ function createInitialStore() {
 }
 
 function createDefaultFabrics() {
-  const compositionIdByLabel = new Map(DEFAULT_COMPOSITIONS.map((item) => [item.label, item.id]));
   return DEFAULT_FABRICS_SOURCE.map(([name, label], index) => ({
     id: defaultFabricId(index),
-    name,
-    compositionId: compositionIdByLabel.get(label),
+    name: stripCoatingName(name),
+    compositionId: slugify(label),
     order: index + 1,
   }));
 }
@@ -329,6 +329,13 @@ function normalizeV3Store(store) {
     store.styles = Object.fromEntries(store.styles.map((style) => [style.name, cloneStyle(style)]));
   }
   store.styles = store.styles && typeof store.styles === "object" ? store.styles : {};
+  store.compositions.forEach((composition) => { composition.label = stripCoatingName(composition.label); });
+  store.fabrics.forEach((fabric) => { fabric.name = stripCoatingName(fabric.name); });
+  Object.values(store.styles).forEach((style) => (style.rows || []).forEach((row) => {
+    if (row.fabricName) row.fabricName = stripCoatingName(row.fabricName);
+    if (typeof row.composition === "string") row.composition = stripCoatingName(row.composition);
+    if (row.compositionDefinition) row.compositionDefinition.label = stripCoatingName(row.compositionDefinition.label);
+  }));
   store.unmappedFabrics = Array.isArray(store.unmappedFabrics) ? store.unmappedFabrics : [];
   store.careLabelMappings = normalizeCareLabelMappings(store.careLabelMappings, store.materials);
   store.careLabelOptions = { ...clone(DEFAULT_CARE_LABEL_OPTIONS), ...(store.careLabelOptions || {}) };
@@ -511,16 +518,22 @@ function getStyleFabricComposition(style, fabric) {
   return getComposition(style?.compositionByFabricId?.[fabric.id] || fabric.compositionId);
 }
 
+function stripCoatingName(value) {
+  return String(value || "").replace(/\(\s*(?:uncoated|coated)\s*\)/gi, "")
+    .replace(/\b(?:uncoated|coated)\b/gi, "").replace(/\s{2,}/g, " ").trim();
+}
+
 function polyesterRatio(composition) {
   return Number(composition?.components?.polyester_coated || 0) + Number(composition?.components?.polyester_uncoated || 0);
 }
 
 function applyPolyesterCoating(composition, coating) {
+  if (!composition) return composition;
+  composition = { ...composition, label: stripCoatingName(composition.label) };
   if (!polyesterRatio(composition) || !["coated", "uncoated"].includes(coating)) return composition;
   const components = { ...composition.components, polyester_coated: 0, polyester_uncoated: 0 };
   components[`polyester_${coating}`] = polyesterRatio(composition);
-  const label = String(composition.label || "").replace(/\s*\((?:UNCOATED|COATED)\)/gi, "");
-  return { ...composition, label: `${label} (${coating.toUpperCase()})`, components };
+  return { ...composition, components };
 }
 
 // The displayed coating suffix is an override, not a different DB composition.

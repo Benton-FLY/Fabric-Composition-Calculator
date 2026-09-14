@@ -14,7 +14,7 @@ assert.equal(calculation.totals.polyester_uncoated, 0.92);
 assert.equal(calculation.totals.polyester_coated, 0);
 assert.equal(calculation.totals.polyurethane, 0.08);
 assert.equal(calculation.grandTotal, 1);
-assert.match(calculation.usedRows[0].compositionLabel, /UNCOATED/);
+assert.doesNotMatch(calculation.usedRows[0].compositionLabel, /coated/i);
 assert.equal(JSON.stringify(context.getComposition(fabric.compositionId)), original);
 assert.equal(context.calculateStyle({ ...style, coatingByFabricId: {} }).totals.polyester_coated, 0.92);
 const restored = context.cloneStyle(JSON.parse(JSON.stringify(style)));
@@ -31,10 +31,10 @@ console.log('Polyester coating calculation and persistence tests passed');
 // Editing YY must preserve the original composition behind its displayed override.
 const customRow = { compositionDefinition: { label: 'Custom blend (COATED)', components: { polyester_coated: 80, nylon: 20 } }, polyesterCoating: 'uncoated' };
 const display = context.applyPolyesterCoating(context.getRowComposition(customRow), customRow.polyesterCoating);
-assert.equal(display.label, 'Custom blend (UNCOATED)');
+assert.equal(display.label, 'Custom blend');
 assert.equal(context.getEditedRowCompositionLabel(customRow, display.label), 'Custom blend (COATED)');
 assert.equal(context.getEditedRowCompositionLabel(customRow, 'NYLON100%'), 'NYLON100%');
-assert.equal(context.applyPolyesterCoating(display, 'coated').label, 'Custom blend (COATED)');
+assert.equal(context.applyPolyesterCoating(display, 'coated').label, 'Custom blend');
 // A dropdown selection in normal mode updates this style, including saved results.
 context.commitWorkspaceChange = (action) => action();
 const manualDraft = context.newDraft(style);
@@ -64,3 +64,16 @@ context.updateImportDraftRow({ target: { dataset: { importRowYy: importRow.rowId
 assert.equal(importRow.compositionId, nylon.id);
 assert.equal(importRow.yy, 2);
 assert.equal(context.calculateStyle({ name: 'Import', rows: [importRow] }).totals.nylon, 1);
+
+assert.equal(context.stripCoatingName('POLY TASLAN PA COATED (WRC0) (CN)'), 'POLY TASLAN PA (WRC0) (CN)');
+assert.equal(context.stripCoatingName('Fabric (uncoated)'), 'Fabric');
+assert.ok(context.appState.compositions.every(c => !/\bcoated\b|\buncoated\b/i.test(c.label)));
+assert.ok(context.appState.fabrics.every(f => !/\bcoated\b|\buncoated\b/i.test(f.name)));
+const legacy = context.createInitialStore();
+legacy.fabrics[0].name = 'Legacy (COATED)';
+legacy.compositions[0].label = 'Blend (UNCOATED)';
+const idsBefore = legacy.fabrics.map(f => f.compositionId).join(',');
+context.normalizeV3Store(legacy);
+assert.equal(legacy.fabrics[0].name, 'Legacy');
+assert.equal(legacy.compositions[0].label, 'Blend');
+assert.equal(legacy.fabrics.map(f => f.compositionId).join(','), idsBefore);
