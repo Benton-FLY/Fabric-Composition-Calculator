@@ -136,7 +136,7 @@ function bindElements() {
     "extractSelectedBtn", "deleteSelectedBtn", "downloadSelectedCsvBtn", "downloadSelectedXlsxBtn",
     "fabricSearchInput", "clearYyBtn", "extractCurrentBtn", "fabricTableHead", "fabricTableBody",
     "currentStyleLabel", "totalYyLabel", "summaryTableBody", "resultArea", "printBtn",
-    "downloadCsvBtn", "downloadXlsxBtn",
+    "downloadCsvBtn", "downloadXlsxBtn", "resultStyleList", "resultStyleCount",
     "dbEditBtn", "dbSaveLockBtn", "dbCancelBtn", "dbWarning",
     "validationArea", "materialSearchInput", "addMaterialBtn", "materialTableBody",
     "compositionSearchInput", "addCompositionBtn", "compositionList", "fabricDbSearchInput",
@@ -1092,13 +1092,27 @@ function extractSelectedStyles() {
 function renderResults(styles) {
   lastExtractedStyles = styles.map(cloneStyle);
   els.resultArea.innerHTML = "";
+  els.resultStyleList.innerHTML = "";
+  els.resultStyleCount.textContent = styles.length;
   const materials = getMaterials();
   const options = getCareLabelOptionsFromUi();
-  styles.forEach((style) => {
+  styles.forEach((style, index) => {
     const calculation = calculateStyle(style);
     const careLabels = getSelectedCareLabelModes(options).map((mode) => generateCareLabel(calculation.totals, mode, options));
     const section = document.createElement("section");
     section.className = "result-section";
+    section.id = `result-style-${index}`;
+    section.tabIndex = -1;
+    const link = document.createElement("a");
+    link.className = "result-style-link";
+    link.href = `#${section.id}`;
+    link.textContent = style.name || "이름 없는 스타일";
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      section.focus({ preventScroll: true });
+      section.scrollIntoView({ block: "start" });
+    });
+    els.resultStyleList.append(link);
     section.innerHTML = `
       <h3>STYLE / ${escapeHtml(style.name)}</h3>
       ${options.showPreview ? renderCareLabelPreview(careLabels, options) : ""}
