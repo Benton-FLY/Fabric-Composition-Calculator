@@ -1,0 +1,37 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const source = fs.readFileSync('app.js', 'utf8').replace(/document\.addEventListener\([\s\S]*?^}\);/m, '');
+const storage = new Map();
+function boot() {
+  const context = { console, window: {}, document: {}, localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } };
+  vm.createContext(context);
+  vm.runInContext(source, context);
+  vm.runInContext('els.styleNameInput = { value: "" }; els.autosaveStatus = { textContent: "" };', context);
+  context.restoreLastWorkspace();
+  return context;
+}
+let app = boot();
+assert.equal(app.activeDraft().styleName, '');
+assert.equal(Object.keys(app.createInitialStore().styles).length, 0);
+const first = app.activeDraft();
+first.styleName = 'Work in progress';
+first.yyByFabricId.fabric_001 = 1.25;
+first.compositionByFabricId.fabric_001 = 'nylon100';
+first.coatingByFabricId.fabric_001 = 'uncoated';
+const imported = app.newDraft({ name: 'Imported' }, { sourceType: 'import', rows: [{ rowId: 'row1', yy: 2, polyesterCoating: 'coated', compositionDefinition: { label: 'Custom', components: { polyester_coated: 100 } } }] });
+app.persistWorkspace();
+app = boot();
+assert.equal(app.activeDraft().id, imported.id);
+assert.equal(app.activeDraft().rows[0].yy, 2);
+assert.equal(app.activeDraft().rows[0].compositionDefinition.components.polyester_coated, 100);
+const snapshot = app.workspaceSnapshot();
+assert.equal(snapshot.styleDrafts[first.id].yyByFabricId.fabric_001, 1.25);
+assert.equal(snapshot.styleDrafts[first.id].coatingByFabricId.fabric_001, 'uncoated');
+assert.equal(snapshot.styleDrafts[first.id].compositionByFabricId.fabric_001, 'nylon100');
+app.localStorage.setItem = () => { throw new Error('Quota exceeded'); };
+assert.doesNotThrow(() => app.persistWorkspace());
+assert.match(vm.runInContext('els.autosaveStatus.textContent', app), /저장하지 못했습니다/);
+storage.set('fabricCompositionWorkspace', '{broken');
+assert.equal(boot().activeDraft().styleName, '');
+console.log('Workspace persistence tests passed');

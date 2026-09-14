@@ -1,5 +1,6 @@
 const STORAGE_KEY = "fabricCompositionCalculator";
 const STORAGE_VERSION = 4;
+const WORKSPACE_KEY = "fabricCompositionWorkspace";
 const MIGRATION_BACKUP_KEY = "fabricCompositionBackupBeforeV2Migration";
 const CARE_LABEL_MODES = ["internal", "us", "eu"];
 const CARE_LABEL_TYPES = ["fiber", "custom-warning", "animal-nontextile"];
@@ -99,21 +100,6 @@ const DEFAULT_FABRICS_SOURCE = [
   ["#YK-L002 (90%POLY+10%SPANDEX, WEFT KNIT) HK24-00402-001 (GSM)", "POLYESTER90%+SPANDEX10%"],
 ];
 
-const SAMPLE_STYLE = {
-  name: "28 EVO PANT",
-  yyByFabricId: {
-    fabric_009: 0.509,
-    fabric_006: 1.017,
-    fabric_001: 0.107,
-    fabric_003: 0.247,
-    fabric_013: 0.401,
-    fabric_012: 0.048,
-    fabric_014: 0.052,
-    fabric_016: 0.088,
-    fabric_015: 0.742,
-  },
-};
-
 let appState;
 appState = loadStore();
 let currentYyByFabricId = {};
@@ -135,18 +121,23 @@ const els = {};
 document.addEventListener("DOMContentLoaded", () => {
   bindElements();
   bindEvents();
+  restoreLastWorkspace();
   renderAll();
-  loadStyle(SAMPLE_STYLE.name);
+  document.addEventListener("input", () => queueMicrotask(persistWorkspace));
+  document.addEventListener("change", () => queueMicrotask(persistWorkspace));
+  document.addEventListener("click", () => queueMicrotask(persistWorkspace));
+  window.addEventListener("pagehide", persistWorkspace);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") persistWorkspace(); });
 });
 
 function bindElements() {
   [
-    "messageArea", "styleNameInput", "newStyleBtn", "saveStyleBtn", "savedStyleList", "savedCount",
+    "autosaveStatus", "messageArea", "styleNameInput", "newStyleBtn", "saveStyleBtn", "savedStyleList", "savedCount",
     "extractSelectedBtn", "deleteSelectedBtn", "downloadSelectedCsvBtn", "downloadSelectedXlsxBtn",
     "fabricSearchInput", "clearYyBtn", "extractCurrentBtn", "fabricTableHead", "fabricTableBody",
     "currentStyleLabel", "totalYyLabel", "summaryTableBody", "resultArea", "printBtn",
-    "downloadCsvBtn", "downloadXlsxBtn", "exportJsonBtn", "importJsonInput", "restoreSampleBtn",
-    "resetAllBtn", "unmappedList", "dbEditBtn", "dbSaveLockBtn", "dbCancelBtn", "dbBackupBtn", "dbWarning",
+    "downloadCsvBtn", "downloadXlsxBtn",
+    "dbEditBtn", "dbSaveLockBtn", "dbCancelBtn", "dbWarning",
     "validationArea", "materialSearchInput", "addMaterialBtn", "materialTableBody",
     "compositionSearchInput", "addCompositionBtn", "compositionList", "fabricDbSearchInput",
     "fabricSortSelect", "addFabricBtn", "fabricDbTableBody", "carePreviewToggle",
@@ -194,11 +185,6 @@ function bindEvents() {
   els.deleteSelectedBtn.addEventListener("click", deleteSelectedStyles);
   els.downloadSelectedCsvBtn.addEventListener("click", () => downloadCsv(getSelectedStylesForAction()));
   els.downloadSelectedXlsxBtn.addEventListener("click", () => downloadXlsx(getSelectedStylesForAction()));
-  els.exportJsonBtn.addEventListener("click", exportJson);
-  els.dbBackupBtn.addEventListener("click", exportJson);
-  els.importJsonInput.addEventListener("change", importJson);
-  els.restoreSampleBtn.addEventListener("click", restoreSampleData);
-  els.resetAllBtn.addEventListener("click", resetAllData);
   els.printBtn.addEventListener("click", () => window.print());
   els.downloadCsvBtn.addEventListener("click", () => downloadCsv());
   els.downloadXlsxBtn.addEventListener("click", () => downloadXlsx());
@@ -259,7 +245,7 @@ function createInitialStore() {
     materials: clone(DEFAULT_MATERIALS),
     compositions: clone(DEFAULT_COMPOSITIONS),
     fabrics: createDefaultFabrics(),
-    styles: { [SAMPLE_STYLE.name]: cloneStyle(SAMPLE_STYLE) },
+    styles: {},
     unmappedFabrics: [],
     careLabelMappings: clone(DEFAULT_CARE_LABEL_MAPPINGS),
     careLabelOptions: clone(DEFAULT_CARE_LABEL_OPTIONS),
@@ -301,9 +287,6 @@ function migrateToV2(oldData) {
     store.styles[name] = { name, yyByFabricId };
   });
 
-  if (Object.keys(store.styles).length === 0) {
-    store.styles[SAMPLE_STYLE.name] = cloneStyle(SAMPLE_STYLE);
-  }
   return store;
 }
 
@@ -352,7 +335,6 @@ function renderAll() {
   renderFabricTable();
   renderSavedStyles();
   renderDbManagement();
-  renderUnmappedFabrics();
   renderAutocompleteLists();
   renderStyleDraftList();
 }
@@ -436,6 +418,30 @@ function renderStyleDraftList() {
   els.styleDraftList.querySelectorAll("[data-draft-open]").forEach((button) => button.addEventListener("click", () => activateDraft(button.dataset.draftOpen)));
   els.styleDraftList.querySelectorAll("[data-draft-select]").forEach((input) => input.addEventListener("click", (event) => { event.stopPropagation(); if (input.checked) selectedStyleIds.add(input.dataset.draftSelect); else selectedStyleIds.delete(input.dataset.draftSelect); renderStyleDraftList(); }));
   els.styleDraftList.querySelectorAll("[data-draft-delete]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); deleteDrafts([button.dataset.draftDelete]); }));
+}
+
+function persistWorkspace() {
+  if (!activeDraft()) return;
+  try {
+    localStorage.setItem(WORKSPACE_KEY, JSON.stringify(workspaceSnapshot()));
+    if (els.autosaveStatus) els.autosaveStatus.textContent = "마지막 작업이 이 브라우저에 자동 저장됩니다.";
+  } catch {
+    if (els.autosaveStatus) els.autosaveStatus.textContent = "브라우저 저장 공간에 작업을 저장하지 못했습니다. 창을 닫기 전에 결과를 다운로드하세요.";
+  }
+}
+
+function restoreLastWorkspace() {
+  try {
+    const snapshot = JSON.parse(localStorage.getItem(WORKSPACE_KEY) || "null");
+    if (snapshot?.styleDrafts && typeof snapshot.styleDrafts === "object" && !Array.isArray(snapshot.styleDrafts)) {
+      styleDrafts = Object.fromEntries(Object.entries(snapshot.styleDrafts).filter(([, draft]) => draft && typeof draft === "object" && typeof draft.styleName === "string" && draft.yyByFabricId && typeof draft.yyByFabricId === "object"));
+      activeStyleId = styleDrafts[snapshot.activeStyleId] ? snapshot.activeStyleId : Object.keys(styleDrafts)[0] || null;
+      selectedStyleIds = new Set((Array.isArray(snapshot.selectedStyleIds) ? snapshot.selectedStyleIds : []).filter(id => styleDrafts[id]));
+    }
+  } catch { /* A missing or damaged local snapshot starts a blank workspace. */ }
+  if (!activeDraft()) newDraft();
+  els.styleNameInput.value = activeDraft().styleName;
+  currentYyByFabricId = { ...activeDraft().yyByFabricId };
 }
 
 function workspaceSnapshot() { return clone({ styleDrafts, activeStyleId, selectedStyleIds: Array.from(selectedStyleIds) }); }
@@ -723,6 +729,7 @@ function allocateIntegerPercentages(items) {
 }
 
 function renderFabricTable() {
+  persistWorkspace();
   const materials = getMaterials();
   const query = els.fabricSearchInput.value.trim().toLowerCase();
   els.fabricTableHead.innerHTML = `
@@ -1567,82 +1574,6 @@ function compositionTotal(composition) {
 
 function isFabricUsed(fabricId) {
   return Object.values(appState.styles).some((style) => parseYy(style.yyByFabricId?.[fabricId]) > 0);
-}
-
-function exportJson() {
-  downloadBlob(new Blob([JSON.stringify(appState, null, 2)], { type: "application/json" }), `fabric-composition-backup-${dateStamp()}.json`);
-}
-
-function importJson(event) {
-  const file = event.target.files[0];
-  event.target.value = "";
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const parsed = JSON.parse(reader.result);
-      const nextStore = parsed.version === STORAGE_VERSION ? parsed : migrateToV3(parsed);
-      normalizeV3Store(nextStore);
-      const errors = validateStoreShape(nextStore);
-      if (errors.length) throw new Error(errors.join("\n"));
-      if (!confirm("JSON 백업 내용으로 현재 저장 데이터를 교체할까요?")) return;
-      appState = nextStore;
-      saveStore();
-      renderAll();
-      const firstStyle = Object.keys(appState.styles)[0];
-      if (firstStyle) loadStyle(firstStyle);
-      else newStyle();
-      showMessage("복원되었습니다.");
-    } catch (error) {
-      showMessage(`JSON 복원 실패: ${error.message}`, "error");
-    }
-  };
-  reader.readAsText(file);
-}
-
-function validateStoreShape(store) {
-  const errors = [];
-  if (!Array.isArray(store.materials)) errors.push("materials 배열이 없습니다.");
-  if (!Array.isArray(store.compositions)) errors.push("compositions 배열이 없습니다.");
-  if (!Array.isArray(store.fabrics)) errors.push("fabrics 배열이 없습니다.");
-  if (!store.styles || typeof store.styles !== "object") errors.push("styles 객체가 없습니다.");
-  return errors;
-}
-
-function restoreSampleData() {
-  if (!confirm("초기 예시 데이터로 복원할까요? 현재 데이터는 교체됩니다. 필요한 경우 먼저 JSON Export를 실행하세요.")) return;
-  appState = createInitialStore();
-  saveStore();
-  renderAll();
-  loadStyle(SAMPLE_STYLE.name);
-}
-
-function resetAllData() {
-  if (!confirm("전체 저장 데이터를 초기화할까요? 이 작업은 되돌릴 수 없습니다. 필요한 경우 먼저 JSON 백업을 다운로드하세요.")) return;
-  appState = { ...createInitialStore(), styles: {} };
-  saveStore();
-  currentYyByFabricId = {};
-  renderAll();
-  newStyle();
-}
-
-function renderUnmappedFabrics() {
-  if (!els.unmappedList) return;
-  const items = appState.unmappedFabrics || [];
-  if (!items.length) {
-    els.unmappedList.innerHTML = "";
-    return;
-  }
-  els.unmappedList.innerHTML = `
-    <h3>Unmapped Fabrics</h3>
-    <p>v2 마이그레이션 중 기본 Fabric DB와 매칭하지 못한 YY 데이터입니다. 기존 백업은 localStorage의 ${MIGRATION_BACKUP_KEY}에 보관됩니다.</p>
-    <table class="data-table">
-      <thead><tr><th>Style</th><th>Fabric Key</th><th>YY</th></tr></thead>
-      <tbody>
-        ${items.map((item) => `<tr><td>${escapeHtml(item.style)}</td><td>${escapeHtml(item.fabric)}</td><td class="number-cell">${formatNumber(item.yy, 3)}</td></tr>`).join("")}
-      </tbody>
-    </table>
-  `;
 }
 
 function downloadCsv(inputStyles) {

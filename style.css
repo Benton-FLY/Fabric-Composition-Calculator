@@ -916,3 +916,16 @@ select {
   min-width: 400px;
   box-sizing: border-box;
 }
+
+.privacy-notice {
+  margin: 12px 20px;
+  padding: 12px 16px;
+  border: 1px solid #b7d9d5;
+  border-radius: 8px;
+  background: #f0faf8;
+  color: #24534d;
+  line-height: 1.5;
+}
+.privacy-notice p { margin: 4px 0; }
+.privacy-notice small { display: block; }
+@media print { .privacy-notice { display: none; } }

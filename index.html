@@ -13,17 +13,23 @@
     <header class="app-header">
       <div>
         <h1>케어라벨 혼용률 계산기</h1>
-        <p>Style별 YY 입력, 결과 추출, DB 관리, JSON 백업/복원</p>
+        <p>Style별 YY 입력, 결과 추출, DB 관리</p>
       </div>
       <div id="messageArea" class="message-area" aria-live="polite"></div>
     </header>
+
+    <aside class="privacy-notice" aria-label="데이터 처리 및 저장 안내">
+      <strong>브라우저 내 처리 · 입력 데이터 서버 전송 없음</strong>
+      <p>선택한 Excel 파일, 원단 정보, 혼용률과 계산 결과는 이 브라우저에서 처리하며, 앱은 이 데이터를 서버에 업로드하거나 전송하지 않습니다.</p>
+      <p id="autosaveStatus" role="status">마지막 작업이 이 브라우저에 자동 저장됩니다.</p>
+      <small>같은 기기·브라우저·사이트에서 작업을 이어갈 수 있습니다. 브라우저 데이터를 삭제하거나 시크릿 창을 닫으면 기록이 사라질 수 있습니다. 페이지 접속 및 Excel 라이브러리 로딩 시 웹 호스팅·외부 CDN 연결은 발생합니다.</small>
+    </aside>
 
     <nav class="top-tabs" aria-label="Main sections">
       <button type="button" class="tab-button active" data-tab="styleInput">Style Input</button>
       <button type="button" class="tab-button" data-tab="savedStyles">Saved Styles</button>
       <button type="button" class="tab-button" data-tab="results">Results</button>
       <button type="button" class="tab-button" data-tab="dbManagement">DB Management</button>
-      <button type="button" class="tab-button" data-tab="backupRestore">Backup / Restore</button>
     </nav>
 
     <main class="app-shell">
@@ -40,7 +46,7 @@
         <div class="toolbar">
           <div class="style-controls">
             <label class="field-label" for="styleNameInput">Style Name</label>
-            <input id="styleNameInput" class="text-input" type="text" placeholder="예: 28 EVO PANT" autocomplete="off">
+            <input id="styleNameInput" class="text-input" type="text" placeholder="스타일명을 입력하세요" autocomplete="off">
           </div>
           <div class="search-wrap">
             <label class="field-label" for="fabricSearchInput">Fabric Search</label>
@@ -136,13 +142,12 @@
         <div class="db-toolbar">
           <div>
             <h2>DB Management</h2>
-            <p id="dbWarning" class="db-warning hidden">DB를 수정하면 기존 스타일 계산 결과에도 영향을 줄 수 있습니다. 수정 전 JSON 백업을 권장합니다.</p>
+            <p id="dbWarning" class="db-warning hidden">DB를 수정하면 기존 스타일 계산 결과에도 영향을 줄 수 있습니다. 변경 내용을 확인한 뒤 저장하세요.</p>
           </div>
           <div class="button-row">
             <button type="button" id="dbEditBtn" class="primary">DB 수정 모드</button>
             <button type="button" id="dbSaveLockBtn" class="primary" disabled>DB 저장 후 잠금</button>
             <button type="button" id="dbCancelBtn" disabled>변경 취소</button>
-            <button type="button" id="dbBackupBtn">JSON 백업 다운로드</button>
           </div>
         </div>
 
@@ -218,19 +223,6 @@
         </section>
       </section>
 
-      <section id="backupRestore" class="tab-panel">
-        <div class="panel backup-panel">
-          <h2>Backup / Restore</h2>
-          <div class="button-row">
-            <button type="button" id="exportJsonBtn" class="primary">전체 데이터 JSON Export</button>
-            <label class="file-button" for="importJsonInput">전체 데이터 JSON Import</label>
-            <input id="importJsonInput" class="sr-only" type="file" accept="application/json,.json">
-            <button type="button" id="restoreSampleBtn">초기 예시 데이터로 복원</button>
-            <button type="button" id="resetAllBtn" class="danger">전체 초기화</button>
-          </div>
-          <div id="unmappedList" class="unmapped-list"></div>
-        </div>
-      </section>
     </main>
     <div id="uploadPreviewModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Excel import preview">
       <div class="modal-card">
